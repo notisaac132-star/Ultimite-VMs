@@ -214,7 +214,7 @@ main { padding: 26px 32px 40px; }
 .modal-head { display: flex; align-items: center; justify-content: space-between; }
 .modal-foot { display: flex; gap: 8px; align-items: center; padding-top: 4px; }
 
-#step-config, #step-os { display: flex; flex-direction: column; gap: 16px; }
+#step-config, #step-os, #step-mode { display: flex; flex-direction: column; gap: 16px; }
 .picked { display: flex; gap: 14px; align-items: center; }
 .field { display: flex; flex-direction: column; gap: 6px; font-weight: 600; }
 .field > span { display: flex; justify-content: space-between; }
@@ -244,3 +244,21 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
   .banner { margin-left: 16px; margin-right: 16px; }
   .sliders { grid-template-columns: 1fr; }
 }
+
+/* ---------- Quick / Advanced choice ---------- */
+.modes { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.mode-card {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 8px; text-align: left;
+  padding: 20px; border-radius: var(--radius); cursor: pointer; font: inherit; color: var(--text);
+  background: var(--bg); border: 1px solid var(--line); transition: transform 0.1s, border-color 0.15s;
+}
+.mode-card:hover { transform: translateY(-2px); border-color: var(--accent); }
+.mode-card.recommended { border-color: rgba(108, 140, 255, 0.55); background: linear-gradient(135deg, rgba(108, 140, 255, 0.12), rgba(155, 108, 255, 0.08)); }
+.mode-icon { font-size: 26px; }
+.mode-title { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+.badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.segmented { display: inline-flex; align-self: flex-start; background: var(--panel-2); border-radius: 10px; padding: 3px; gap: 3px; }
+.segmented button { border: none; background: none; color: var(--muted); font: inherit; font-weight: 600; padding: 7px 14px; border-radius: 8px; cursor: pointer; }
+.segmented button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
+.logo-chrome { background: linear-gradient(135deg, #4285f4, #1a56c4); }
+@media (max-width: 760px) { .modes { grid-template-columns: 1fr; } }

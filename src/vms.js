@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const catalog = require("./catalog");
 const host = require("./host");
-const { download, fetchText } = require("./download");
+const { download, fetchText, unzipLargest } = require("./download");
 const qemu = require("./engines/qemu");
 const apple = require("./engines/apple");
 
@@ -70,26 +70,33 @@ function setJob(id, job) {
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "vm";
 
 // Creates the VM and starts preparing it (downloading its disc, creating its disk) in the background.
-function create({ osId, name, cpus, memoryMB, diskGB, iso }) {
+// Quick Setup (quick: true) uses the recommended settings, installs Windows by itself and starts the VM
+// as soon as it's ready. Advanced Setup takes the user's settings and, optionally, their own ISO.
+function create({ osId, quick, name, cpus, memoryMB, diskGB, iso }) {
   const entry = catalog.byId(osId);
   if (!entry) throw new Error("Unknown operating system.");
   const plan = host.plan(entry);
   if (!plan.engine) throw new Error(plan.reason);
+  if (quick && !entry.quick) throw new Error(`${entry.name} needs Advanced Setup.`);
   if (entry.source.type === "manual" && !iso) throw new Error("Choose the install disc (.iso file) first.");
+  const settings = quick ? { ...entry.defaults, name: uniqueName(entry.name.replace(/ \(.*\)$/, "")) } : { name, cpus, memoryMB, diskGB };
 
   const vm = {
-    id: `${slug(name)}-${crypto.randomBytes(3).toString("hex")}`,
-    name: String(name).trim().slice(0, 60) || entry.name,
+    id: `${slug(settings.name)}-${crypto.randomBytes(3).toString("hex")}`,
+    name: String(settings.name).trim().slice(0, 60) || entry.name,
     osId,
     family: entry.family,
     engine: plan.engine,
     guestArch: plan.guestArch,
     firmware: entry.firmware || "bios",
     bypassChecks: !!entry.bypassChecks,
-    cpus: clamp(cpus, 1, host.info.cpus),
-    memoryMB: clamp(memoryMB, 512, host.info.memoryMB),
-    diskGB: clamp(diskGB, 8, 2048),
-    iso: iso || null,
+    // Hands-free Windows install; only with the ISO the app downloads (its language is known).
+    unattended: !!(quick && entry.unattended),
+    autoStart: !!quick,
+    cpus: clamp(settings.cpus, 1, host.info.cpus),
+    memoryMB: clamp(settings.memoryMB, 512, Math.max(1024, host.info.memoryMB - 1024)),
+    diskGB: clamp(settings.diskGB, 8, 2048),
+    iso: (!quick && iso) || null,
     ready: false,
     installed: false,
     createdAt: Date.now(),
@@ -97,6 +104,13 @@ function create({ osId, name, cpus, memoryMB, diskGB, iso }) {
   save(vm);
   prepare(vm.id);
   return view(vm);
+}
+
+function uniqueName(base) {
+  const taken = new Set(list().map((v) => v.name));
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
+  return name;
 }
 
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, Math.round(Number(n) || lo)));
@@ -121,13 +135,18 @@ async function prepare(id) {
       step(`Finding the newest ${entry.name}…`);
       const found = await entry.source.resolve(vm.guestArch, fetchText, app.getLocale());
       vm.iso = await fetchDisc(found, entry.name, step, abort.signal);
+      if (found.culture) vm.culture = found.culture;
       save(vm);
     }
 
     if (vm.engine === "apple" && vm.family === "macos") {
-      step("Asking Apple for the newest macOS…");
-      const url = await apple.latestIpswUrl();
-      const ipsw = await fetchDisc({ url, file: url.split("/").pop() }, "macOS", step, abort.signal);
+      // Advanced Setup can bring its own .ipsw; otherwise ask Apple for the newest one.
+      let ipsw = vm.iso;
+      if (!ipsw) {
+        step("Asking Apple for the newest macOS…");
+        const url = await apple.latestIpswUrl();
+        ipsw = await fetchDisc({ url, file: url.split("/").pop() }, "macOS", step, abort.signal);
+      }
       step("Installing macOS…", 0);
       await apple.installMacOS(vm, folderOf(id), ipsw, {
         signal: abort.signal,
@@ -141,9 +160,12 @@ async function prepare(id) {
     // (Apple engine Linux VMs create their disk on first start.)
 
     vm.ready = true;
+    const autoStart = vm.autoStart;
+    vm.autoStart = false;
     save(vm);
     liveOf(id).job = null;
     changed(id);
+    if (autoStart) await start(id);
   } catch (err) {
     const l = liveOf(id);
     l.job = null;
@@ -157,8 +179,19 @@ async function prepare(id) {
 }
 
 // Downloads into Install Discs (skipped when already there). Returns the file path.
-async function fetchDisc({ url, sha256, file }, label, step, signal) {
-  const dest = path.join(discs, path.basename(file));
+// Zipped images (ChromeOS Flex) are unpacked and the .zip deleted.
+async function fetchDisc({ url, sha256, file, unzip }, label, step, signal) {
+  const name = path.basename(file);
+  if (unzip) {
+    const image = path.join(discs, name.replace(/\.zip$/i, ""));
+    if (fs.existsSync(image)) return image;
+    const zip = await fetchDisc({ url, sha256, file: name }, label, step, signal);
+    step(`Unpacking ${label}…`, 0);
+    await unzipLargest(zip, image, (p) => step(`Unpacking ${label}…`, p));
+    fs.rmSync(zip, { force: true });
+    return image;
+  }
+  const dest = path.join(discs, name);
   if (fs.existsSync(dest)) return dest;
   const mb = (n) => (n / 1024 / 1024 / 1024).toFixed(1);
   step(`Downloading ${label}…`, 0);

@@ -7,6 +7,7 @@ window.osLogo = (logo, size = 48) => {
     fedora: `<circle cx="12" cy="12" r="7.5" fill="none" stroke="#fff" stroke-width="1.6"/><path d="M14.8 8.2h-1.6a2 2 0 0 0-2 2V17M9.2 12.2h4.6" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/>`,
     debian: `<path d="M15.6 8.6a5 5 0 1 0 .8 5.4M13.9 13.2a2.2 2.2 0 1 1-.4-3" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>`,
     mint: `<path d="M6 7v6.5a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4V9.5M10 7v6.5M10 9.5a2 2 0 0 1 4 0v4M14 9.5a2 2 0 0 1 4 0" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round"/>`,
+    chrome: `<circle cx="12" cy="12" r="7.6" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="12" cy="12" r="3" fill="#fff"/><path d="M12 9h6.9M9.4 13.5 5.9 7.5M14.6 13.5l-3.4 6" stroke="#fff" stroke-width="1.6" stroke-linecap="round"/>`,
     disc: `<circle cx="12" cy="12" r="7.5" fill="none" stroke="#fff" stroke-width="1.6"/><circle cx="12" cy="12" r="2" fill="#fff"/><path d="M12 6.5a5.5 5.5 0 0 1 5.5 5.5" fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" opacity=".7"/>`,
   };
   return `<span class="logo logo-${logo}" style="width:${size}px;height:${size}px"><svg viewBox="0 0 24 24" aria-hidden="true">${glyphs[logo] || glyphs.disc}</svg></span>`;

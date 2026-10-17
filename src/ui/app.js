@@ -43,9 +43,14 @@ function card(vm) {
   }
   else primary = `<button class="btn primary" data-act="start">▶ Start</button>`;
 
-  const hint = vm.status === "running" && vm.iso && !vm.installed
-    ? `<p class="hint">Installing? Follow the steps in the VM's window${vm.family === "windows" ? " (no product key? click <b>“I don't have a product key”</b>)" : ""}. When the OS is installed, shut down and click <b>⋯ → Eject disc</b>.</p>`
-    : "";
+  let hint = "";
+  if (vm.status === "running" && vm.iso && !vm.installed) {
+    if (vm.unattended) hint = "Windows is installing itself. Just wait: it restarts a few times and ends on the desktop (about 20–40 minutes).";
+    else if (vm.family === "linux") hint = "You're in the live desktop. To keep it for good, use the <b>Install</b> icon on its desktop, then shut down and click <b>⋯ → Eject disc</b>.";
+    else if (vm.family === "chromeos") hint = "Pick <b>Try it first</b> to use ChromeOS now, or <b>Install ChromeOS Flex</b> to keep it, then shut down and click <b>⋯ → Eject disc</b>.";
+    else hint = `Follow the steps in the VM's window${vm.family === "windows" ? " (no product key? click <b>“I don't have a product key”</b>)" : ""}. When it's installed, shut down and click <b>⋯ → Eject disc</b>.`;
+  }
+  if (hint) hint = `<p class="hint">${hint}</p>`;
 
   return `
   <article class="vm-card status-${vm.status}" data-id="${esc(vm.id)}">
@@ -92,7 +97,7 @@ async function act(id, action) {
       case "settings": return openSettings(vm);
       case "eject": return await vmApi.update(id, { iso: null });
       case "insert": {
-        const iso = await vmApi.pickIso();
+        const iso = await vmApi.pickIso(vm.family);
         if (iso) await vmApi.update(id, { iso });
         return;
       }
@@ -148,8 +153,10 @@ function renderSetup() {
   $("#setup").hidden = !needsQemu();
 }
 
-$("#setup-install").addEventListener("click", async () => {
+// Installs QEMU, showing progress in the setup banner. Returns true when it's ready.
+async function installEngine() {
   const btn = $("#setup-install");
+  $("#setup").hidden = false;
   btn.disabled = true;
   btn.textContent = "Installing…";
   $("#setup-log").hidden = false;
@@ -166,7 +173,9 @@ $("#setup-install").addEventListener("click", async () => {
     if (result.url) vmApi.openUrl(result.url);
   }
   renderSetup();
-});
+  return result.engines.qemu;
+}
+$("#setup-install").addEventListener("click", installEngine);
 $("#setup-check").addEventListener("click", async () => {
   state.engines = await vmApi.checkEngines();
   renderSetup();
@@ -186,17 +195,20 @@ $("#slow-fix").addEventListener("click", async () => {
 });
 
 // ---------- New VM wizard ----------
+// Steps: pick an OS → Quick Setup (one click) or Advanced Setup (settings + your own ISO).
 
 const wizard = $("#wizard");
 let picked = null; // catalog entry
-let pickedIso = null;
+let pickedIso = null; // Advanced Setup: the user's own file (null = download automatically)
+let useOwnFile = true;
 
 function osTile(os) {
   const off = !os.engine;
+  const from = { windows: "From Microsoft", macos: "From Apple", chromeos: "From Google" }[os.family] || (os.source.type === "auto" ? "Automatic download" : "Bring your ISO");
   return `<button type="button" class="os-tile ${off ? "off" : ""}" data-os="${esc(os.id)}" ${off ? `title="${esc(os.reason)}"` : ""}>
     ${osLogo(os.logo, 44)}
     <span class="os-name">${esc(os.name)}</span>
-    <span class="os-sub">${off ? "Not available here" : os.source.type === "auto" ? (os.family === "windows" ? "From Microsoft" : "Automatic download") : os.source.type === "ipsw" ? "From Apple" : "Bring your ISO"}</span>
+    <span class="os-sub">${off ? "Not available here" : from}</span>
   </button>`;
 }
 
@@ -209,11 +221,12 @@ function openWizard(osId) {
 }
 
 function showStep(step) {
-  $("#step-os").hidden = step !== "os";
-  $("#step-config").hidden = step !== "config";
-  $("#wizard-back").hidden = step !== "config";
+  for (const s of ["os", "mode", "config"]) $(`#step-${s}`).hidden = step !== s;
+  $("#wizard-back").hidden = step === "os";
   $("#wizard-create").hidden = step !== "config";
-  $("#wizard-title").textContent = step === "os" ? "New VM" : `New ${picked.name} VM`;
+  $("#wizard-error").hidden = true;
+  $("#wizard-title").textContent = step === "os" ? "New VM" : step === "mode" ? `${picked.name}` : `${picked.name}: Advanced Setup`;
+  $("#wizard-back").dataset.to = step === "config" && picked.quick ? "mode" : "os";
 }
 
 function pickOs(id) {
@@ -222,23 +235,48 @@ function pickOs(id) {
     showError("#wizard-error", os.reason);
     return;
   }
-  $("#wizard-error").hidden = true;
   picked = os;
   pickedIso = null;
-  $("#picked-logo").innerHTML = osLogo(os.logo, 56);
-  $("#picked-name").textContent = os.name;
-  $("#picked-blurb").textContent = os.blurb;
-  $("#picked-warning").hidden = !os.warning;
-  $("#picked-warning").textContent = os.warning || "";
+  useOwnFile = true;
+  for (const where of ["mode", "picked"]) {
+    $(`#${where}-logo`).innerHTML = osLogo(os.logo, 56);
+    $(`#${where}-name`).textContent = os.name;
+    $(`#${where}-blurb`).textContent = os.blurb;
+  }
+  for (const el of [$("#mode-warning"), $("#picked-warning")]) {
+    el.hidden = !os.warning;
+    el.textContent = os.warning || "";
+  }
+  if (!os.quick) return openAdvanced();
+  $("#quick-text").textContent = os.quick;
+  showStep("mode");
+}
 
+function openAdvanced() {
   const taken = new Set([...vms.values()].map((v) => v.name));
-  let name = os.name.replace(/ \(.*\)$/, "");
-  for (let n = 2; taken.has(name); n++) name = `${os.name.replace(/ \(.*\)$/, "")} ${n}`;
+  const base = picked.name.replace(/ \(.*\)$/, "");
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
   $("#cfg-name").value = name;
-
-  setupSliders("cfg", os.defaults);
+  setupSliders("cfg", picked.defaults);
   renderDisc();
   showStep("config");
+}
+
+async function quickSetup() {
+  if (picked.engine === "qemu" && !state.engines.qemu) {
+    wizard.close();
+    if (!(await installEngine())) return;
+  }
+  try {
+    const vm = await vmApi.create({ osId: picked.id, quick: true });
+    vms.set(vm.id, vm);
+    render();
+    if (wizard.open) wizard.close();
+  } catch (err) {
+    if (!wizard.open) wizard.showModal();
+    showError("#wizard-error", cleanError(err));
+  }
 }
 
 function setupSliders(prefix, values, minDisk = 16) {
@@ -261,32 +299,38 @@ function setupSliders(prefix, values, minDisk = 16) {
   show();
 }
 
+// What kind of file each OS installs from.
+const FILE_KIND = {
+  macos: { label: "macOS restore image (.ipsw)", hint: "An .ipsw file for Apple Silicon Macs." },
+  chromeos: { label: "ChromeOS Flex image (.bin)", hint: "The .bin file from Google's ChromeOS Flex download (unzipped)." },
+};
+
 function renderDisc() {
-  const src = picked.source;
-  const own = pickedIso
-    ? `<div class="disc-row"><code class="path">${esc(pickedIso)}</code>
-         ${src.type === "auto" ? `<button type="button" class="btn ghost small" id="use-auto">Download it for me instead</button>` : ""}
-         <button type="button" class="btn ghost small" id="choose-iso">Change…</button></div>`
-    : "";
-  let html;
-  if (src.type === "ipsw") {
-    html = `<div class="disc-auto">✅ <div><b>Install: automatic.</b><br><span class="muted">macOS (about 15 GB) is downloaded from Apple and installed for you. Setup takes 20–40 minutes.</span></div></div>`;
-  } else if (src.type === "auto" && !pickedIso) {
-    const where = picked.family === "windows" ? "straight from Microsoft (about 7 GB)" : "from the official site and checked before it's used";
-    const extra = picked.family === "windows"
-      ? `<br><span class="muted">During setup, click <b>“I don't have a product key”</b>, it installs and runs without one.</span>` : "";
-    html = `<div class="disc-auto">✅ <div><b>Install disc: automatic.</b><br><span class="muted">The newest ${esc(picked.name)} is downloaded ${where}.</span>${extra}</div></div>
-      <button type="button" class="link" id="choose-iso">Already have the ISO file? Use it instead</button>`;
-  } else if (src.type === "auto") {
-    html = `<b>Install disc: your ISO file</b>${own}`;
-  } else {
-    html = `<b>Install disc</b><p class="muted">Choose an .iso file on this computer.</p>
-      ${own || `<div class="disc-row"><button type="button" class="btn primary" id="choose-iso">Choose the ISO file…</button></div>`}`;
-  }
-  $("#disc").innerHTML = html;
-  $("#use-auto")?.addEventListener("click", () => { pickedIso = null; renderDisc(); });
+  const canDownload = picked.source.type !== "manual";
+  const kind = FILE_KIND[picked.family] || { label: "install disc (.iso)", hint: "Any .iso file on this computer." };
+  const autoText = {
+    windows: "The newest version is downloaded straight from Microsoft (about 7 GB). During setup, click <b>“I don't have a product key”</b>.",
+    macos: "The newest macOS (about 15 GB) is downloaded from Apple and installed for you.",
+    chromeos: "The newest ChromeOS Flex is downloaded from Google (about 1.5 GB).",
+  }[picked.family] || "The newest version is downloaded from the official site and checked before it's used.";
+  const own = !canDownload || useOwnFile;
+  $("#disc").innerHTML = `
+    <b>Install from</b>
+    ${canDownload ? `<div class="segmented">
+      <button type="button" data-src="own" class="${own ? "on" : ""}">📁 My own file</button>
+      <button type="button" data-src="auto" class="${own ? "" : "on"}">⬇ Download it for me</button>
+    </div>` : ""}
+    ${own ? `<p class="muted">${kind.hint}</p>
+      <div class="disc-row">
+        <button type="button" class="btn ${pickedIso ? "ghost" : "primary"}" id="choose-iso">${pickedIso ? "Change…" : `Choose ${kind.label}…`}</button>
+        <code class="path">${pickedIso ? esc(pickedIso) : "No file chosen"}</code>
+      </div>` : `<p class="muted">${autoText}</p>`}`;
+  $("#disc").querySelectorAll("[data-src]").forEach((b) => b.addEventListener("click", () => {
+    useOwnFile = b.dataset.src === "own";
+    renderDisc();
+  }));
   $("#choose-iso")?.addEventListener("click", async () => {
-    const iso = await vmApi.pickIso();
+    const iso = await vmApi.pickIso(picked.family);
     if (iso) { pickedIso = iso; renderDisc(); }
   });
 }
@@ -305,13 +349,19 @@ $("#quick-picks").addEventListener("click", (e) => {
   const tile = e.target.closest("[data-os]");
   if (tile) openWizard(tile.dataset.os);
 });
-$("#wizard-back").addEventListener("click", () => showStep("os"));
+$("#mode-quick").addEventListener("click", quickSetup);
+$("#mode-advanced").addEventListener("click", openAdvanced);
+$("#wizard-back").addEventListener("click", (e) => showStep(e.currentTarget.dataset.to));
 $("#new-vm").addEventListener("click", () => openWizard());
 
 $("#wizard-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (picked.source.type === "manual" && !pickedIso) return showError("#wizard-error", "Choose the install disc (.iso file) first.");
-  if (picked.engine === "qemu" && !state.engines.qemu) return showError("#wizard-error", "Finish the one-time setup first: click “Install VM engine” at the top of the window.");
+  const own = picked.source.type === "manual" || useOwnFile;
+  if (own && !pickedIso) return showError("#wizard-error", "Choose the file to install from first (or switch to “Download it for me”).");
+  if (picked.engine === "qemu" && !state.engines.qemu) {
+    wizard.close();
+    if (!(await installEngine())) return;
+  }
   try {
     const vm = await vmApi.create({
       osId: picked.id,
@@ -319,12 +369,13 @@ $("#wizard-form").addEventListener("submit", async (e) => {
       cpus: Number($("#cfg-cpus").value),
       memoryMB: Number($("#cfg-mem").value),
       diskGB: Number($("#cfg-disk").value),
-      iso: pickedIso,
+      iso: own ? pickedIso : null,
     });
     vms.set(vm.id, vm);
     render();
-    wizard.close();
+    if (wizard.open) wizard.close();
   } catch (err) {
+    if (!wizard.open) wizard.showModal();
     showError("#wizard-error", cleanError(err));
   }
 });
@@ -353,7 +404,7 @@ function renderSetIso() {
   $("#set-iso-eject").disabled = !editIso;
 }
 $("#set-iso-change").addEventListener("click", async () => {
-  const iso = await vmApi.pickIso();
+  const iso = await vmApi.pickIso(editing.family);
   if (iso) { editIso = iso; renderSetIso(); }
 });
 $("#set-iso-eject").addEventListener("click", () => { editIso = null; renderSetIso(); });

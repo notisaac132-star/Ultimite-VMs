@@ -1,5 +1,5 @@
 // What this computer is, and which engine runs each OS on it.
-//   qemu  - QEMU (Windows, Linux and Windows-on-Mac VMs). Installed once from the app's setup banner.
+//   qemu  - QEMU (Windows, Linux, ChromeOS and Windows-on-Mac VMs). Installed once from the app's setup banner.
 //   apple - Apple's built-in Virtualization framework through the bundled macvm helper (macOS and Linux on Macs).
 const os = require("os");
 
@@ -37,7 +37,8 @@ function plan(entry) {
     return { engine: null, reason: `${entry.name} is only made for Intel/AMD computers, and this ${info.name} has an ARM chip.` };
   }
   // Linux and custom ISOs: Macs use Apple's built-in virtualization (fast, nothing to install).
-  return { engine: platform === "darwin" ? "apple" : "qemu", guestArch: arch };
+  // ChromeOS Flex needs a PC-style machine, so it always runs on QEMU.
+  return { engine: platform === "darwin" && entry.family !== "chromeos" ? "apple" : "qemu", guestArch: arch };
 }
 
 module.exports = { info, plan };

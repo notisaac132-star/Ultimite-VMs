@@ -18,42 +18,47 @@
 |---|:-:|:-:|:-:|:-:|
 | **Windows 11 / 10** | ✅ | ✅ (emulated, slow) | ✅ | ✅ |
 | **macOS** | ❌ ¹ | ✅ | ❌ ² | ❌ ¹ |
+| **ChromeOS Flex** | ✅ | ❌ ³ | ✅ | ✅ |
 | **Ubuntu, Fedora, Debian** | ✅ | ✅ | ✅ | ✅ |
-| **Linux Mint** | ✅ | ❌ (no ARM version) | ✅ | ✅ |
+| **Linux Mint** | ✅ | ❌ ³ | ✅ | ✅ |
 | **Any other .iso** | ✅ | ✅ | ✅ | ✅ |
 
 ¹ Apple's license only allows macOS to run on Apple hardware, so the app doesn't offer it on PCs.
 ² Apple's virtualization only runs macOS guests on Apple Silicon (M1 or newer).
+³ Only made for Intel/AMD chips.
 
 ## How it works
 
-1. **Open the app** and click **New VM** (or one of the big OS tiles).
-2. **Pick an OS.** Adjust processors, memory and disk with the sliders if you want.
-3. **Install disc — automatic for every OS:**
-   - **Windows** — downloaded straight from Microsoft's servers (in your computer's language). During setup click **"I don't have a product key"**; Windows installs and runs without one.
-   - **Linux** — downloaded from the official site and checked (SHA-256) before use.
-   - **macOS** — downloaded straight from Apple and installed for you.
-   - Already have an ISO? Click **"Already have the ISO file? Use it instead"**.
+Click **New VM** (or one of the big OS tiles), pick an OS, then choose:
 
-   Microsoft sometimes limits automatic downloads. If that happens the VM card shows **Microsoft's site ↗** and **Choose ISO…**, so you can download it in your browser and carry on.
-4. Click **Start**. The VM opens in its own window. Install the OS like on a real computer.
-5. When the OS is installed, shut it down and click **⋯ → Eject disc**.
+### ⚡ Quick Setup (one click)
 
-Your VMs live in a folder called **Ultimate VMs** in your home folder. Each card in the app has **Start / Shut down / Force stop**, and the **⋯** menu has **Settings**, **Eject / Insert disc**, **Show files** and **Delete**.
+Uses recommended settings and downloads everything for you, then starts the VM by itself.
+
+| OS | What Quick Setup does |
+|---|---|
+| **Windows 11 / 10** | Downloads Windows straight from Microsoft and **installs it with no questions**: no product key, no Microsoft account, TPM/Secure Boot checks skipped. You end up on the desktop as user **User** (no password) in about 20–40 minutes. |
+| **macOS** | Downloads the newest macOS from Apple and installs it. Then you finish Apple's short welcome setup. |
+| **ChromeOS Flex** | Downloads it from Google and starts it. Pick **Try it first** or **Install ChromeOS Flex**. |
+| **Linux** | Downloads the newest version (checked with SHA-256) and opens its **live desktop** right away. Use its **Install** icon to keep it. |
+
+### ⚙ Advanced Setup
+
+Pick the name, processors, memory and disk size, and install from **your own file** (`.iso`; `.ipsw` for macOS; `.bin` for ChromeOS Flex), or switch to **Download it for me**.
+
+When an OS is installed, shut it down and click **⋯ → Eject disc**. Your VMs live in a folder called **Ultimate VMs** in your home folder. Each card has **Start / Shut down / Force stop**, and the **⋯** menu has **Settings**, **Eject / Insert disc**, **Show files** and **Delete**.
+
+Microsoft sometimes limits automatic downloads. If that happens, the VM card shows **Microsoft's site ↗** and **Choose ISO…** so you can download it in your browser and carry on.
 
 ### First launch on Windows and Linux
 
-The app shows a **one-time setup** banner: click **Install VM engine**. It installs [QEMU](https://www.qemu.org) (free and open source) using Windows Package Manager, or your Linux package manager. Click **Yes** if Windows asks for permission.
+The app needs [QEMU](https://www.qemu.org) (free and open source) for Windows, Linux and ChromeOS VMs. Quick Setup installs it automatically the first time; you can also click **Install VM engine** on the setup banner. It uses Windows Package Manager, or your Linux package manager. Click **Yes** if Windows asks for permission.
 
 If a VM is slow on Windows, the app offers **Turn on fast mode**, which switches on Windows' built-in *Hypervisor Platform* feature (needs a restart).
 
-### Windows 11 without TPM
-
-Windows 11 normally refuses to install without TPM 2.0 and Secure Boot. Ultimate VMs gives the installer a small answer file that skips those checks, so it just works.
-
 ### On a Mac
 
-macOS and Linux VMs use Apple's built-in Virtualization framework — nothing extra to install. Windows VMs on a Mac need QEMU; the setup banner installs it with Homebrew (it opens Terminal and asks for your Mac password if Homebrew isn't installed yet).
+macOS and Linux VMs use Apple's built-in Virtualization framework — nothing extra to install. Windows and ChromeOS VMs on a Mac need QEMU; it's installed with Homebrew (it opens Terminal and asks for your Mac password if Homebrew isn't installed yet).
 
 ## Installing the app
 

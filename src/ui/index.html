@@ -70,6 +70,29 @@
         <div id="os-grid" class="os-grid"></div>
       </div>
 
+      <div id="step-mode" hidden>
+        <div class="picked">
+          <div id="mode-logo"></div>
+          <div>
+            <strong id="mode-name"></strong>
+            <p id="mode-blurb" class="muted"></p>
+          </div>
+        </div>
+        <p id="mode-warning" class="note warn" hidden></p>
+        <div class="modes">
+          <button type="button" class="mode-card recommended" id="mode-quick">
+            <span class="mode-icon">⚡</span>
+            <span class="mode-title">Quick Setup <span class="badge">Recommended</span></span>
+            <span id="quick-text" class="muted"></span>
+          </button>
+          <button type="button" class="mode-card" id="mode-advanced">
+            <span class="mode-icon">⚙</span>
+            <span class="mode-title">Advanced Setup</span>
+            <span class="muted">Choose the name, processors, memory and disk size, and install from your own ISO file (or let the app download it).</span>
+          </button>
+        </div>
+      </div>
+
       <div id="step-config" hidden>
         <div class="picked">
           <div id="picked-logo"></div>

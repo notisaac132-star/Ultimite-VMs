@@ -35,6 +35,7 @@ ipcMain.handle("state", () => ({
       family: entry.family,
       logo: entry.logo,
       blurb: entry.blurb,
+      quick: entry.quick,
       defaults: entry.defaults,
       source: { type: entry.source.type, page: entry.source.page },
       ...plan,
@@ -63,11 +64,16 @@ ipcMain.handle("vm-delete", async (_e, id) => {
 });
 ipcMain.handle("vm-show-folder", (_e, id) => shell.openPath(vms.folderOf(id)));
 
-ipcMain.handle("pick-iso", async () => {
+// The file types each OS installs from (macOS: Apple restore images; ChromeOS Flex: its unzipped .bin image).
+const FILE_FILTERS = {
+  macos: { name: "macOS restore images", extensions: ["ipsw"] },
+  chromeos: { name: "ChromeOS Flex images", extensions: ["bin", "img"] },
+};
+ipcMain.handle("pick-iso", async (_e, family) => {
   const { canceled, filePaths } = await dialog.showOpenDialog(win, {
-    title: "Choose the install disc",
+    title: "Choose the file to install from",
     properties: ["openFile"],
-    filters: [{ name: "Disc images", extensions: ["iso", "img"] }, { name: "All files", extensions: ["*"] }],
+    filters: [FILE_FILTERS[family] || { name: "Disc images", extensions: ["iso", "img"] }, { name: "All files", extensions: ["*"] }],
   });
   return canceled ? null : filePaths[0];
 });

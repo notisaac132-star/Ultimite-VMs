@@ -103,24 +103,58 @@ function freePort() {
   });
 }
 
-// Answers Windows 11's TPM / Secure Boot / CPU / RAM checks during setup. Windows Setup reads
-// autounattend.xml from any attached drive; here it's a folder QEMU shows to the VM as a USB stick.
-const BYPASS_XML = `<?xml version="1.0" encoding="utf-8"?>
-<unattend xmlns="urn:schemas-microsoft-com:unattend">
-  <settings pass="windowsPE">
-    <component name="Microsoft-Windows-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
-      <RunSynchronous>
-${["BypassTPMCheck", "BypassSecureBootCheck", "BypassRAMCheck", "BypassCPUCheck", "BypassStorageCheck"]
-  .map((key, i) => `        <RunSynchronousCommand wcm:action="add">
-          <Order>${i + 1}</Order>
-          <Path>reg add HKLM\\SYSTEM\\Setup\\LabConfig /v ${key} /t REG_DWORD /d 1 /f</Path>
-        </RunSynchronousCommand>`)
-  .join("\n")}
-      </RunSynchronous>
-    </component>
-  </settings>
+// Windows Setup reads autounattend.xml from any attached drive; here it's a folder QEMU shows to the VM as a
+// USB stick. It always answers Windows 11's TPM / Secure Boot / CPU / RAM checks. For Quick Setup
+// (vm.unattended) it also answers every setup question: wipe the virtual disk, install Windows Pro with
+// Microsoft's generic install key (no activation), and create the auto-login account "User" (no password).
+function unattendXml(vm) {
+  const component = (name, body) =>
+    `    <component name="${name}" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">\n${body}\n    </component>`;
+  const commands = (list) => !list.length ? "" : `      <RunSynchronous>\n${list.map((cmd, i) =>
+    `        <RunSynchronousCommand wcm:action="add"><Order>${i + 1}</Order><Path>${cmd}</Path></RunSynchronousCommand>`).join("\n")}\n      </RunSynchronous>`;
+  const reg = (key, name) => `reg add ${key} /v ${name} /t REG_DWORD /d 1 /f`;
+  const bypass = vm.bypassChecks
+    ? ["BypassTPMCheck", "BypassSecureBootCheck", "BypassRAMCheck", "BypassCPUCheck", "BypassStorageCheck"].map((n) => reg("HKLM\\SYSTEM\\Setup\\LabConfig", n))
+    : [];
+  const locale = (c) => `      <InputLocale>${c}</InputLocale>\n      <SystemLocale>${c}</SystemLocale>\n      <UILanguage>${c}</UILanguage>\n      <UserLocale>${c}</UserLocale>`;
+  const noPassword = "<Password><Value></Value><PlainText>true</PlainText></Password>";
+  const partition = (order, inner) => `<CreatePartition wcm:action="add"><Order>${order}</Order>${inner}</CreatePartition>`;
+  const modify = (order, inner) => `<ModifyPartition wcm:action="add"><Order>${order}</Order><PartitionID>${order}</PartitionID>${inner}</ModifyPartition>`;
+  const uefi = vm.firmware === "uefi";
+
+  const passes = [];
+  if (!vm.unattended) {
+    passes.push(`  <settings pass="windowsPE">\n${component("Microsoft-Windows-Setup", commands(bypass))}\n  </settings>`);
+  } else {
+    const c = vm.culture || "en-US";
+    const disk = uefi
+      ? [partition(1, "<Type>EFI</Type><Size>300</Size>"), partition(2, "<Type>MSR</Type><Size>16</Size>"), partition(3, "<Type>Primary</Type><Extend>true</Extend>")].join("")
+        + `</CreatePartitions><ModifyPartitions>${modify(1, "<Format>FAT32</Format><Label>System</Label>")}${modify(2, "")}${modify(3, "<Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter>")}`
+      : partition(1, "<Type>Primary</Type><Extend>true</Extend>")
+        + `</CreatePartitions><ModifyPartitions>${modify(1, "<Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter><Active>true</Active>")}`;
+    passes.push(`  <settings pass="windowsPE">
+${component("Microsoft-Windows-International-Core-WinPE", `      <SetupUILanguage><UILanguage>${c}</UILanguage></SetupUILanguage>\n${locale(c)}`)}
+${component("Microsoft-Windows-Setup", `${commands(bypass)}
+      <DiskConfiguration><Disk wcm:action="add"><DiskID>0</DiskID><WillWipeDisk>true</WillWipeDisk><CreatePartitions>${disk}</ModifyPartitions></Disk></DiskConfiguration>
+      <ImageInstall><OSImage><InstallTo><DiskID>0</DiskID><PartitionID>${uefi ? 3 : 1}</PartitionID></InstallTo></OSImage></ImageInstall>
+      <UserData><AcceptEula>true</AcceptEula><ProductKey><Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key><WillShowUI>OnError</WillShowUI></ProductKey></UserData>`)}
+  </settings>`);
+    passes.push(`  <settings pass="specialize">
+${component("Microsoft-Windows-Deployment", commands([reg("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE", "BypassNRO")]))}
+  </settings>`);
+    passes.push(`  <settings pass="oobeSystem">
+${component("Microsoft-Windows-International-Core", locale(c))}
+${component("Microsoft-Windows-Shell-Setup", `      <AutoLogon><Enabled>true</Enabled><Username>User</Username>${noPassword}<LogonCount>9999999</LogonCount></AutoLogon>
+      <OOBE><HideEULAPage>true</HideEULAPage><HideOEMRegistrationScreen>true</HideOEMRegistrationScreen><HideOnlineAccountScreens>true</HideOnlineAccountScreens><HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE><ProtectYourPC>3</ProtectYourPC></OOBE>
+      <UserAccounts><LocalAccounts><LocalAccount wcm:action="add"><Name>User</Name><Group>Administrators</Group>${noPassword}</LocalAccount></LocalAccounts></UserAccounts>`)}
+  </settings>`);
+  }
+  return `<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+${passes.join("\n")}
 </unattend>
 `;
+}
 
 function audioArgs() {
   const backend = { win32: "dsound", darwin: "coreaudio" }[info.platform];
@@ -136,6 +170,9 @@ function accelArgs(guestArch) {
 
 function buildArgs(vm, dir, qmpPort) {
   const windows = vm.family === "windows";
+  // ChromeOS Flex comes as a USB-stick image and wants PC-style (SATA/Intel) hardware with a virtio display.
+  const chromeos = vm.family === "chromeos";
+  const pcHardware = windows || chromeos;
   const x86 = vm.guestArch === "x86_64";
   const disk = path.join(dir, "disk.qcow2");
   const args = [
@@ -164,28 +201,33 @@ function buildArgs(vm, dir, qmpPort) {
 
   // The disk boots first; while it's still empty the firmware falls through to the install disc.
   args.push("-drive", `file=${q(disk)},if=none,id=hd0,format=qcow2,discard=unmap`);
-  if (windows) args.push("-device", "ide-hd,drive=hd0,bus=ide.0,bootindex=0");
+  if (pcHardware) args.push("-device", "ide-hd,drive=hd0,bus=ide.0,bootindex=0");
   else args.push("-device", "virtio-blk-pci,drive=hd0,bootindex=0");
 
-  if (vm.iso) {
+  if (vm.iso && chromeos) {
+    // snapshot=on: the live system can write to the stick without changing the downloaded image.
+    args.push("-drive", `file=${q(vm.iso)},if=none,id=usb0,format=raw,snapshot=on`, "-device", "usb-storage,drive=usb0,bootindex=1");
+  } else if (vm.iso) {
     args.push("-drive", `file=${q(vm.iso)},if=none,id=cd0,media=cdrom,readonly=on`);
     if (x86) args.push("-device", "ide-cd,drive=cd0,bus=ide.1,bootindex=1");
     else args.push("-device", "virtio-scsi-pci,id=scsi0", "-device", "scsi-cd,drive=cd0,bus=scsi0.0,bootindex=1");
   }
 
-  if (vm.bypassChecks && vm.iso) {
+  if ((vm.bypassChecks || vm.unattended) && vm.iso && !vm.installed) {
     const unattend = path.join(dir, "unattend");
     fs.mkdirSync(unattend, { recursive: true });
-    fs.writeFileSync(path.join(unattend, "autounattend.xml"), BYPASS_XML);
+    fs.writeFileSync(path.join(unattend, "autounattend.xml"), unattendXml(vm));
     args.push("-drive", `file=fat:rw:${q(unattend)},if=none,id=ud0,format=raw`, "-device", "usb-storage,drive=ud0");
   }
 
-  if (x86) {
+  if (chromeos) {
+    args.push("-device", "virtio-vga");
+  } else if (x86) {
     args.push("-vga", "std");
   } else {
     args.push("-device", "virtio-gpu-pci", "-device", "usb-kbd");
   }
-  args.push("-nic", `user,model=${windows ? "e1000e" : "virtio-net-pci"}`);
+  args.push("-nic", `user,model=${pcHardware ? "e1000e" : "virtio-net-pci"}`);
   if (windows) args.push("-rtc", "base=localtime");
   args.push(...audioArgs());
   return args;
@@ -317,4 +359,4 @@ function enableFastMode() {
   });
 }
 
-module.exports = { find, createDisk, resizeDisk, start, install, enableFastMode, buildArgs };
+module.exports = { find, createDisk, resizeDisk, start, install, enableFastMode, buildArgs, unattendXml };

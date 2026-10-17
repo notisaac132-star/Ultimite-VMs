@@ -35,12 +35,16 @@ function compareVersions(a, b) {
 // Windows: asks microsoft.com for a (24-hour) direct ISO link, the same way its download page does.
 // If Microsoft refuses (it rate-limits automated requests now and then), the error tells the user how to
 // get the ISO from the page instead; `page` is shown as a button on the VM card.
+// Computer language → [Microsoft's ISO language name, Windows culture used by the automatic install].
 const MS_LANGUAGES = {
-  "en-US": "English", "en-GB": "English International", en: "English", es: "Spanish", "es-MX": "Spanish (Mexico)",
-  fr: "French", "fr-CA": "French Canadian", de: "German", it: "Italian", "pt-BR": "Brazilian Portuguese", pt: "Portuguese",
-  nl: "Dutch", pl: "Polish", ru: "Russian", uk: "Ukrainian", tr: "Turkish", ar: "Arabic", he: "Hebrew", ja: "Japanese",
-  ko: "Korean", "zh-CN": "Chinese Simplified", "zh-TW": "Chinese Traditional", sv: "Swedish", da: "Danish", nb: "Norwegian",
-  fi: "Finnish", cs: "Czech", el: "Greek", hu: "Hungarian", ro: "Romanian", th: "Thai", vi: "Vietnamese",
+  "en-US": ["English", "en-US"], "en-GB": ["English International", "en-GB"], en: ["English", "en-US"],
+  es: ["Spanish", "es-ES"], "es-MX": ["Spanish (Mexico)", "es-MX"], "es-419": ["Spanish (Mexico)", "es-MX"],
+  fr: ["French", "fr-FR"], "fr-CA": ["French Canadian", "fr-CA"], de: ["German", "de-DE"], it: ["Italian", "it-IT"],
+  "pt-BR": ["Brazilian Portuguese", "pt-BR"], pt: ["Portuguese", "pt-PT"], nl: ["Dutch", "nl-NL"], pl: ["Polish", "pl-PL"],
+  ru: ["Russian", "ru-RU"], uk: ["Ukrainian", "uk-UA"], tr: ["Turkish", "tr-TR"], ar: ["Arabic", "ar-SA"], he: ["Hebrew", "he-IL"],
+  ja: ["Japanese", "ja-JP"], ko: ["Korean", "ko-KR"], "zh-CN": ["Chinese Simplified", "zh-CN"], "zh-TW": ["Chinese Traditional", "zh-TW"],
+  sv: ["Swedish", "sv-SE"], da: ["Danish", "da-DK"], nb: ["Norwegian", "nb-NO"], fi: ["Finnish", "fi-FI"], cs: ["Czech", "cs-CZ"],
+  el: ["Greek", "el-GR"], hu: ["Hungarian", "hu-HU"], ro: ["Romanian", "ro-RO"], th: ["Thai", "th-TH"],
 };
 
 const microsoft = (pageName) => async (_arch, fetchText, locale = "en-US") => {
@@ -56,8 +60,9 @@ const microsoft = (pageName) => async (_arch, fetchText, locale = "en-US") => {
   const api = "https://www.microsoft.com/software-download-connector/api/";
   const query = `profile=606624d44113&friendlyFileName=undefined&Locale=en-US&sessionID=${session}`;
   const { Skus: skus = [] } = JSON.parse(await fetchText(`${api}getskuinformationbyproductedition?${query}&ProductEditionId=${edition[1]}&SKU=undefined`, { referrer: page }));
-  const wanted = [MS_LANGUAGES[locale], MS_LANGUAGES[locale.split("-")[0]], "English"];
-  const sku = wanted.map((lang) => skus.find((s) => s.Language === lang)).find(Boolean) || skus[0];
+  const wanted = [MS_LANGUAGES[locale], MS_LANGUAGES[locale.split("-")[0]], MS_LANGUAGES.en].filter(Boolean);
+  const match = wanted.map(([name, culture]) => ({ culture, sku: skus.find((s) => s.Language === name) })).find((m) => m.sku);
+  const sku = match?.sku || skus[0];
   if (!sku) throw new Error("Microsoft didn't list any Windows downloads.");
 
   const links = JSON.parse(await fetchText(`${api}GetProductDownloadLinksBySku?${query}&productEditionId=undefined&SKU=${sku.Id}`, { referrer: page }));
@@ -68,8 +73,23 @@ const microsoft = (pageName) => async (_arch, fetchText, locale = "en-US") => {
       "Microsoft's server didn't allow the automatic download this time (it limits how often this works).\n" +
       "Click “Resume setup” to try again later, or download the ISO on Microsoft's site and click “Choose ISO…”.");
   }
-  return { url: iso.Uri, file: decodeURIComponent(new URL(iso.Uri).pathname.split("/").pop()) };
+  return {
+    url: iso.Uri,
+    file: decodeURIComponent(new URL(iso.Uri).pathname.split("/").pop()),
+    culture: match?.culture || "en-US",
+  };
 };
+
+// ChromeOS Flex: the newest stable image from Google's recovery list (a zipped USB-stick image).
+async function chromeosFlex(_arch, fetchText) {
+  const list = JSON.parse(await fetchText("https://dl.google.com/dl/edgedl/chromeos/recovery/cloudready_recovery2.json"));
+  const images = list
+    .filter((i) => /reven/i.test(i.url || "") && /\.zip$/i.test(i.url) && (!i.channel || /stable/i.test(i.channel)))
+    .sort((a, b) => compareVersions(a.version || a.file || "", b.version || b.file || ""));
+  const image = images.pop();
+  if (!image) throw new Error("Google's ChromeOS Flex download list didn't include an image.");
+  return { url: image.url, file: image.url.split("/").pop(), unzip: true };
+}
 
 const ubuntu = (version) => async (arch, fetchText) => {
   const amd = arch === "x86_64";
@@ -78,6 +98,10 @@ const ubuntu = (version) => async (arch, fetchText) => {
   return fromChecksums(fetchText, base, "SHA256SUMS", new RegExp(`^ubuntu-[\\d.]+-desktop-${a}\\.iso$`));
 };
 
+// What "Quick Setup" does for each kind of OS (shown before the user clicks it).
+const QUICK_WINDOWS = "Downloads Windows from Microsoft and installs it by itself, with no questions. In about 20–40 minutes you're on the Windows desktop (user “User”, no password).";
+const QUICK_LINUX = (name) => `Downloads ${name} and opens it straight away as a live desktop you can use immediately. To keep it for good, use the “Install” icon on its desktop.`;
+
 const CATALOG = [
   {
     id: "windows11",
@@ -85,10 +109,12 @@ const CATALOG = [
     family: "windows",
     logo: "windows",
     blurb: "Microsoft's latest Windows, downloaded straight from Microsoft. No product key needed to install.",
+    quick: QUICK_WINDOWS,
     defaults: { cpus: 4, memoryMB: 8192, diskGB: 80 },
     firmware: "uefi",
     // Windows 11 normally refuses to install without TPM 2.0 / Secure Boot; the app answers those checks for you.
     bypassChecks: true,
+    unattended: true,
     source: { type: "auto", resolve: microsoft("windows11"), page: "https://www.microsoft.com/software-download/windows11" },
   },
   {
@@ -97,8 +123,10 @@ const CATALOG = [
     family: "windows",
     logo: "windows",
     blurb: "The classic, downloaded straight from Microsoft. Runs well on older or slower computers.",
+    quick: QUICK_WINDOWS,
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 64 },
     firmware: "bios",
+    unattended: true,
     source: { type: "auto", resolve: microsoft("windows10ISO"), page: "https://www.microsoft.com/software-download/windows10ISO" },
   },
   {
@@ -107,6 +135,7 @@ const CATALOG = [
     family: "macos",
     logo: "apple",
     blurb: "The newest macOS, downloaded straight from Apple. Needs a Mac with Apple Silicon (M1 or newer).",
+    quick: "Downloads the newest macOS from Apple and installs it for you (20–40 minutes). Then finish Apple's short welcome setup and you're on the desktop.",
     defaults: { cpus: 4, memoryMB: 8192, diskGB: 80 },
     source: { type: "ipsw" },
   },
@@ -116,6 +145,7 @@ const CATALOG = [
     family: "linux",
     logo: "ubuntu",
     blurb: "The most popular Linux desktop. Downloaded automatically.",
+    quick: QUICK_LINUX("Ubuntu"),
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     source: { type: "auto", resolve: ubuntu("26.04") },
   },
@@ -125,6 +155,7 @@ const CATALOG = [
     family: "linux",
     logo: "ubuntu",
     blurb: "The previous long-term Ubuntu release. Downloaded automatically.",
+    quick: QUICK_LINUX("Ubuntu"),
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     source: { type: "auto", resolve: ubuntu("24.04") },
   },
@@ -134,6 +165,7 @@ const CATALOG = [
     family: "linux",
     logo: "fedora",
     blurb: "Cutting-edge Linux with the newest GNOME desktop. Downloaded automatically.",
+    quick: QUICK_LINUX("Fedora"),
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     source: {
       type: "auto",
@@ -154,6 +186,7 @@ const CATALOG = [
     family: "linux",
     logo: "debian",
     blurb: "Rock-solid, lightweight Linux. Downloaded automatically.",
+    quick: QUICK_LINUX("Debian"),
     defaults: { cpus: 2, memoryMB: 2048, diskGB: 25 },
     source: {
       type: "auto",
@@ -169,6 +202,7 @@ const CATALOG = [
     family: "linux",
     logo: "mint",
     blurb: "Feels like Windows — great first Linux. Downloaded automatically (Intel/AMD computers only).",
+    quick: QUICK_LINUX("Linux Mint"),
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     archs: ["x86_64"],
     source: {
@@ -181,6 +215,18 @@ const CATALOG = [
         return fromChecksums(fetchText, `${base}${versions.pop()}/`, "sha256sum.txt", /^linuxmint-[\d.]+-cinnamon-64bit\.iso$/);
       },
     },
+  },
+  {
+    id: "chromeos",
+    name: "ChromeOS Flex",
+    family: "chromeos",
+    logo: "chrome",
+    blurb: "Google's ChromeOS for PCs and Macs, downloaded straight from Google. Sign in with your Google account.",
+    quick: "Downloads ChromeOS Flex from Google and starts it. Click “Try it first” to use it right away, or “Install ChromeOS Flex” to keep it.",
+    defaults: { cpus: 2, memoryMB: 4096, diskGB: 32 },
+    firmware: "uefi",
+    archs: ["x86_64"],
+    source: { type: "auto", resolve: chromeosFlex },
   },
   {
     id: "custom",

@@ -66,4 +66,42 @@ async function download(url, dest, { sha256, onProgress = () => {}, signal } = {
   return dest;
 }
 
-module.exports = { fetchText, download };
+// Extracts the biggest file in a .zip (e.g. ChromeOS Flex's disk image) to `dest`.
+function unzipLargest(zipFile, dest, onProgress = () => {}) {
+  const yauzl = require("yauzl");
+  return new Promise((resolve, reject) => {
+    yauzl.open(zipFile, { lazyEntries: true, autoClose: false }, (err, zip) => {
+      if (err) return reject(err);
+      let best = null;
+      zip.on("entry", (entry) => {
+        if (!best || entry.uncompressedSize > best.uncompressedSize) best = entry;
+        zip.readEntry();
+      });
+      zip.on("error", reject);
+      zip.on("end", () => {
+        if (!best) return reject(new Error("The download was empty."));
+        zip.openReadStream(best, (err2, stream) => {
+          if (err2) return reject(err2);
+          const part = `${dest}.part`;
+          const out = fs.createWriteStream(part);
+          let done = 0;
+          stream.on("data", (d) => {
+            done += d.length;
+            onProgress(done / best.uncompressedSize);
+          });
+          stream.on("error", reject);
+          out.on("error", reject);
+          out.on("close", () => {
+            zip.close();
+            fs.renameSync(part, dest);
+            resolve(dest);
+          });
+          stream.pipe(out);
+        });
+      });
+      zip.readEntry();
+    });
+  });
+}
+
+module.exports = { fetchText, download, unzipLargest };
