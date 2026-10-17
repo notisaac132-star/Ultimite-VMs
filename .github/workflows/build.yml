@@ -1,0 +1,119 @@
+name: Build apps
+
+# Every push builds the Windows, Mac and Linux apps. Pushes to the default branch also publish them
+# as the newest GitHub Release (version 1.0.<run number>), which is where the download links and
+# the apps' built-in auto-updater get the latest version from.
+on:
+  push:
+    branches: ["**"]
+    paths-ignore:
+      - "**.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-apps-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version
+      - run: npm run build:windows
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            dist/*.exe
+            dist/*.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+
+  mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version
+      - run: npm run build:mac
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      - name: Check the VM helper kept its virtualization entitlement
+        run: |
+          helper="dist/mac-universal/Ultimate VMs.app/Contents/Resources/macvm"
+          codesign -d --entitlements - "$helper" 2>&1 | tee /dev/stderr | grep -q com.apple.security.virtualization
+          lipo -archs "$helper"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/*.blockmap
+            dist/latest-mac.yml
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        run: npm version 1.0.${{ github.run_number }} --no-git-tag-version
+      - run: npm run build:linux
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            dist/*.AppImage
+            dist/latest-linux.yml
+          if-no-files-found: error
+
+  release:
+    if: github.ref_name == github.event.repository.default_branch
+    needs: [windows, mac, linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: Ultimate VMs 1.0.${{ github.run_number }}
+          target_commitish: ${{ github.sha }}
+          make_latest: "true"
+          body: |
+            **Windows:** download `Ultimate-VMs-Windows-Setup.exe` (installer) or `Ultimate-VMs-Windows-Portable.exe` (no install).
+            **Mac:** download `Ultimate-VMs-Mac.dmg`, open it and drag the app into Applications.
+            **Linux:** download `Ultimate-VMs-Linux.AppImage`, make it executable and run it.
+
+            **Mac says "Apple could not verify…"?** Click **Done**, then go to Apple menu → System Settings → Privacy & Security, scroll down and click **Open Anyway**. No button? Run this in Terminal: `xattr -dr com.apple.quarantine "/Applications/Ultimate VMs.app"`
+            **Windows says "Windows protected your PC"?** Click **More info → Run anyway**.
+
+            Built from ${{ github.sha }}.
+          files: out/*

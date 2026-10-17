@@ -1,0 +1,63 @@
+# Builds the Windows, Mac and Linux apps from the shared src/ folder (see .github/workflows/build.yml).
+appId: com.isaac.ultimatevms
+productName: Ultimate VMs
+directories:
+  output: dist
+  buildResources: build
+files:
+  - src/**/*
+  - package.json
+
+win:
+  icon: src/icon.png
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: Ultimate-VMs-Windows-Setup.${ext}
+  shortcutName: Ultimate VMs
+  uninstallDisplayName: Ultimate VMs
+portable:
+  artifactName: Ultimate-VMs-Windows-Portable.${ext}
+
+mac:
+  icon: src/icon.png
+  category: public.app-category.utilities
+  # Universal = one download for Apple Silicon and Intel Macs.
+  target:
+    - target: dmg
+      arch: [universal]
+    - target: zip
+      arch: [universal]
+  artifactName: Ultimate-VMs-Mac.${ext}
+  # The VM helper (built by scripts/build-macvm.sh) runs macOS and Linux VMs with Apple's Virtualization framework.
+  extraResources:
+    - from: mac/build/macvm
+      to: macvm
+  # It's already a universal binary, so it's the same file in both halves of the universal app.
+  x64ArchFiles: Contents/Resources/macvm
+  # Ad-hoc signature (no paid Apple Developer account). Every binary, including macvm, gets the virtualization entitlement.
+  identity: "-"
+  hardenedRuntime: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+dmg:
+  title: Ultimate VMs
+
+linux:
+  icon: src/icon.png
+  category: System
+  target:
+    - target: AppImage
+      arch: [x64]
+  artifactName: Ultimate-VMs-Linux.${ext}
+
+# Where installed apps look for updates (files are uploaded by the release job).
+publish:
+  provider: github
+  owner: notisaac132-star
+  repo: Ultimite-VMs

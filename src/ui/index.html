@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:">
+  <title>Ultimate VMs</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32"><rect x="3" y="5" width="26" height="18" rx="3"/><path d="M11 28h10M16 23v5"/><path d="M9 11l4 3-4 3M15 17h7"/></svg>
+      </div>
+      <div>
+        <h1>Ultimate VMs</h1>
+        <p id="host-line" class="muted"></p>
+      </div>
+    </div>
+    <button id="new-vm" class="btn primary"><span aria-hidden="true">＋</span> New VM</button>
+  </header>
+
+  <section id="setup" class="banner" hidden>
+    <div class="banner-text">
+      <strong>One-time setup</strong>
+      <span id="setup-text">Ultimate VMs needs its free VM engine (QEMU) to run Windows and Linux. It takes about a minute.</span>
+    </div>
+    <div class="banner-actions">
+      <button id="setup-check" class="btn ghost" hidden>Check again</button>
+      <button id="setup-install" class="btn primary">Install VM engine</button>
+    </div>
+    <pre id="setup-log" class="log" hidden></pre>
+  </section>
+
+  <section id="slow" class="banner warn" hidden>
+    <div class="banner-text">
+      <strong>Your VM ran in slow mode</strong>
+      <span>Windows' “Hypervisor Platform” feature is off, so the VM was emulated. Turn it on for full speed (needs a restart).</span>
+    </div>
+    <div class="banner-actions">
+      <button id="slow-dismiss" class="btn ghost">Not now</button>
+      <button id="slow-fix" class="btn primary">Turn on fast mode</button>
+    </div>
+  </section>
+
+  <main>
+    <div class="section-head">
+      <h2>My VMs</h2>
+      <span id="vm-count" class="muted"></span>
+    </div>
+    <div id="vm-grid" class="vm-grid"></div>
+
+    <div id="empty" class="empty" hidden>
+      <h2>Create your first VM</h2>
+      <p class="muted">Pick an operating system. Ultimate VMs downloads and sets up everything for you.</p>
+      <div id="quick-picks" class="os-grid"></div>
+    </div>
+  </main>
+
+  <!-- New VM wizard -->
+  <dialog id="wizard" class="modal">
+    <form method="dialog" class="modal-body" id="wizard-form">
+      <header class="modal-head">
+        <h2 id="wizard-title">New VM</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+
+      <div id="step-os">
+        <p class="muted">Which operating system do you want?</p>
+        <div id="os-grid" class="os-grid"></div>
+      </div>
+
+      <div id="step-config" hidden>
+        <div class="picked">
+          <div id="picked-logo"></div>
+          <div>
+            <strong id="picked-name"></strong>
+            <p id="picked-blurb" class="muted"></p>
+          </div>
+        </div>
+        <p id="picked-warning" class="note warn" hidden></p>
+
+        <label class="field">
+          <span>Name</span>
+          <input id="cfg-name" maxlength="60" required autofocus>
+        </label>
+
+        <div class="sliders">
+          <label class="field">
+            <span>Processors <output id="cfg-cpus-out"></output></span>
+            <input id="cfg-cpus" type="range" min="1" step="1">
+          </label>
+          <label class="field">
+            <span>Memory <output id="cfg-mem-out"></output></span>
+            <input id="cfg-mem" type="range" min="1024" step="512">
+          </label>
+          <label class="field">
+            <span>Disk <output id="cfg-disk-out"></output></span>
+            <input id="cfg-disk" type="range" min="16" max="512" step="8">
+          </label>
+        </div>
+
+        <div id="disc" class="disc"></div>
+      </div>
+
+      <p id="wizard-error" class="note error" hidden></p>
+
+      <footer class="modal-foot">
+        <button type="button" id="wizard-back" class="btn ghost" hidden>Back</button>
+        <span class="spacer"></span>
+        <button type="submit" id="wizard-create" class="btn primary" value="create" hidden>Create VM</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- VM settings -->
+  <dialog id="settings" class="modal">
+    <form method="dialog" class="modal-body" id="settings-form">
+      <header class="modal-head">
+        <h2>VM settings</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <label class="field">
+        <span>Name</span>
+        <input id="set-name" maxlength="60" required autofocus>
+      </label>
+      <div class="sliders">
+        <label class="field">
+          <span>Processors <output id="set-cpus-out"></output></span>
+          <input id="set-cpus" type="range" min="1" step="1">
+        </label>
+        <label class="field">
+          <span>Memory <output id="set-mem-out"></output></span>
+          <input id="set-mem" type="range" min="1024" step="512">
+        </label>
+        <label class="field">
+          <span>Disk <output id="set-disk-out"></output></span>
+          <input id="set-disk" type="range" max="1024" step="8">
+          <small class="muted">Disks can grow but not shrink.</small>
+        </label>
+      </div>
+      <div class="field">
+        <span>Install disc</span>
+        <div class="disc-row">
+          <code id="set-iso" class="path"></code>
+          <button type="button" id="set-iso-change" class="btn ghost small">Change…</button>
+          <button type="button" id="set-iso-eject" class="btn ghost small">Eject</button>
+        </div>
+      </div>
+      <p id="settings-error" class="note error" hidden></p>
+      <footer class="modal-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" data-close>Cancel</button>
+        <button type="submit" class="btn primary" value="save">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <script src="logos.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
