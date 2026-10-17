@@ -142,7 +142,7 @@ main { padding: 26px 32px 40px; }
 .status-unfinished .pill { background: rgba(240, 180, 76, 0.15); color: var(--warn); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .chips span { font-size: 12px; padding: 3px 9px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
-.vm-actions { display: flex; align-items: center; gap: 8px; }
+.vm-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .hint { font-size: 12.5px; color: var(--muted); }
 
 .job { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); }
@@ -229,6 +229,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .sliders { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
 
 .disc { background: var(--bg); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.link { align-self: flex-start; background: none; border: none; padding: 0; font: inherit; color: var(--accent); cursor: pointer; }
+.link:hover { text-decoration: underline; }
 .disc ol { margin: 0; padding-left: 20px; color: var(--muted); }
 .disc-auto { display: flex; gap: 10px; align-items: flex-start; }
 .disc-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

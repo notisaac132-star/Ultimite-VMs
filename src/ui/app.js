@@ -35,11 +35,16 @@ function card(vm) {
   let primary;
   if (vm.status === "running") primary = `<button class="btn danger" data-act="stop">Shut down</button>`;
   else if (vm.status === "busy") primary = `<button class="btn ghost" data-act="cancel">Cancel</button>`;
-  else if (vm.status === "unfinished") primary = `<button class="btn primary" data-act="prepare">Resume setup</button>`;
+  else if (vm.status === "unfinished") {
+    primary = `<button class="btn primary" data-act="prepare">Resume setup</button>`;
+    if (vm.error && !vm.iso && os.source?.page) {
+      primary += `<button class="btn ghost" data-act="vendor">Microsoft's site ↗</button><button class="btn ghost" data-act="insert">Choose ISO…</button>`;
+    }
+  }
   else primary = `<button class="btn primary" data-act="start">▶ Start</button>`;
 
   const hint = vm.status === "running" && vm.iso && !vm.installed
-    ? `<p class="hint">Installing? Follow the steps in the VM's window. When the OS is installed, shut down and click <b>Eject disc</b>.</p>`
+    ? `<p class="hint">Installing? Follow the steps in the VM's window${vm.family === "windows" ? " (no product key? click <b>“I don't have a product key”</b>)" : ""}. When the OS is installed, shut down and click <b>⋯ → Eject disc</b>.</p>`
     : "";
 
   return `
@@ -92,6 +97,7 @@ async function act(id, action) {
         return;
       }
       case "folder": return await vmApi.showFolder(id);
+      case "vendor": return await vmApi.openUrl(osById(vm.osId).source.page);
       case "delete": return await vmApi.remove(id);
     }
   } catch (err) {
@@ -190,7 +196,7 @@ function osTile(os) {
   return `<button type="button" class="os-tile ${off ? "off" : ""}" data-os="${esc(os.id)}" ${off ? `title="${esc(os.reason)}"` : ""}>
     ${osLogo(os.logo, 44)}
     <span class="os-name">${esc(os.name)}</span>
-    <span class="os-sub">${off ? "Not available here" : os.source.type === "auto" ? "Automatic download" : os.source.type === "ipsw" ? "From Apple" : "Bring your ISO"}</span>
+    <span class="os-sub">${off ? "Not available here" : os.source.type === "auto" ? (os.family === "windows" ? "From Microsoft" : "Automatic download") : os.source.type === "ipsw" ? "From Apple" : "Bring your ISO"}</span>
   </button>`;
 }
 
@@ -257,24 +263,28 @@ function setupSliders(prefix, values, minDisk = 16) {
 
 function renderDisc() {
   const src = picked.source;
+  const own = pickedIso
+    ? `<div class="disc-row"><code class="path">${esc(pickedIso)}</code>
+         ${src.type === "auto" ? `<button type="button" class="btn ghost small" id="use-auto">Download it for me instead</button>` : ""}
+         <button type="button" class="btn ghost small" id="choose-iso">Change…</button></div>`
+    : "";
   let html;
-  if (src.type === "auto") {
-    html = `<div class="disc-auto">✅ <div><b>Install disc: automatic.</b><br><span class="muted">The newest ${esc(picked.name)} is downloaded from the official site and checked before it's used.</span></div></div>`;
-  } else if (src.type === "ipsw") {
+  if (src.type === "ipsw") {
     html = `<div class="disc-auto">✅ <div><b>Install: automatic.</b><br><span class="muted">macOS (about 15 GB) is downloaded from Apple and installed for you. Setup takes 20–40 minutes.</span></div></div>`;
+  } else if (src.type === "auto" && !pickedIso) {
+    const where = picked.family === "windows" ? "straight from Microsoft (about 7 GB)" : "from the official site and checked before it's used";
+    const extra = picked.family === "windows"
+      ? `<br><span class="muted">During setup, click <b>“I don't have a product key”</b>, it installs and runs without one.</span>` : "";
+    html = `<div class="disc-auto">✅ <div><b>Install disc: automatic.</b><br><span class="muted">The newest ${esc(picked.name)} is downloaded ${where}.</span>${extra}</div></div>
+      <button type="button" class="link" id="choose-iso">Already have the ISO file? Use it instead</button>`;
+  } else if (src.type === "auto") {
+    html = `<b>Install disc: your ISO file</b>${own}`;
   } else {
-    const steps = src.steps ? `<ol>${src.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>` : "";
-    html = `
-      <b>Install disc</b>
-      ${src.page ? `<p class="muted">Microsoft doesn't allow other apps to download Windows, so grab the free ISO from their site:</p>
-        <button type="button" class="btn ghost" id="open-vendor">Open the ${esc(picked.name)} download page ↗</button>${steps}` : `<p class="muted">Choose an .iso file on this computer.</p>`}
-      <div class="disc-row">
-        <button type="button" class="btn ${pickedIso ? "ghost" : "primary"}" id="choose-iso">Choose the ISO file…</button>
-        <code class="path">${pickedIso ? esc(pickedIso) : "No file chosen"}</code>
-      </div>`;
+    html = `<b>Install disc</b><p class="muted">Choose an .iso file on this computer.</p>
+      ${own || `<div class="disc-row"><button type="button" class="btn primary" id="choose-iso">Choose the ISO file…</button></div>`}`;
   }
   $("#disc").innerHTML = html;
-  $("#open-vendor")?.addEventListener("click", () => vmApi.openUrl(src.page));
+  $("#use-auto")?.addEventListener("click", () => { pickedIso = null; renderDisc(); });
   $("#choose-iso")?.addEventListener("click", async () => {
     const iso = await vmApi.pickIso();
     if (iso) { pickedIso = iso; renderDisc(); }

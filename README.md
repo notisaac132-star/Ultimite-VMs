@@ -29,10 +29,13 @@
 
 1. **Open the app** and click **New VM** (or one of the big OS tiles).
 2. **Pick an OS.** Adjust processors, memory and disk with the sliders if you want.
-3. **Install disc:**
-   - **Linux** — downloaded automatically from the official site and checked (SHA-256) before use.
+3. **Install disc — automatic for every OS:**
+   - **Windows** — downloaded straight from Microsoft's servers (in your computer's language). During setup click **"I don't have a product key"**; Windows installs and runs without one.
+   - **Linux** — downloaded from the official site and checked (SHA-256) before use.
    - **macOS** — downloaded straight from Apple and installed for you.
-   - **Windows** — Microsoft doesn't let other apps download it, so the app opens Microsoft's page and shows you exactly what to click. Then choose the ISO file.
+   - Already have an ISO? Click **"Already have the ISO file? Use it instead"**.
+
+   Microsoft sometimes limits automatic downloads. If that happens the VM card shows **Microsoft's site ↗** and **Choose ISO…**, so you can download it in your browser and carry on.
 4. Click **Start**. The VM opens in its own window. Install the OS like on a real computer.
 5. When the OS is installed, shut it down and click **⋯ → Eject disc**.
 

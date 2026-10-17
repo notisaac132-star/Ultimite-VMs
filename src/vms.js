@@ -119,7 +119,7 @@ async function prepare(id) {
     fs.mkdirSync(discs, { recursive: true });
     if (entry.source.type === "auto" && !vm.iso) {
       step(`Finding the newest ${entry.name}…`);
-      const found = await entry.source.resolve(vm.guestArch, fetchText);
+      const found = await entry.source.resolve(vm.guestArch, fetchText, app.getLocale());
       vm.iso = await fetchDisc(found, entry.name, step, abort.signal);
       save(vm);
     }
@@ -224,6 +224,8 @@ async function update(id, changes) {
   if (grow && vm.engine === "qemu") await qemu.resizeDisk(vm, folderOf(id));
   save(vm);
   changed(id);
+  // Picking an ISO for a VM whose download failed carries on with its setup.
+  if (changes.iso && !vm.ready && !liveOf(id).job) prepare(id);
   return view(vm);
 }
 

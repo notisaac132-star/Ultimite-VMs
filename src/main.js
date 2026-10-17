@@ -36,7 +36,7 @@ ipcMain.handle("state", () => ({
       logo: entry.logo,
       blurb: entry.blurb,
       defaults: entry.defaults,
-      source: { type: entry.source.type, page: entry.source.page, steps: entry.source.steps },
+      source: { type: entry.source.type, page: entry.source.page },
       ...plan,
     };
   }),

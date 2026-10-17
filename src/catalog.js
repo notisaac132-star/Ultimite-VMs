@@ -1,9 +1,9 @@
 // The operating systems offered in the "New VM" menu, and where each one's install disc comes from.
 //
 // source.type:
-//   "auto"   - the app finds the newest official ISO and downloads it (resolve() returns { url, sha256, file }).
-//   "manual" - the vendor doesn't allow direct links (Windows), so the app opens the official download page
-//              and the user picks the ISO they downloaded.
+//   "auto"   - the app finds the newest official ISO and downloads it (resolve() returns { url, sha256?, file }).
+//              The user can always pick an ISO they already have instead.
+//   "manual" - the user picks an .iso file (the "Other" entry).
 //   "ipsw"   - macOS: the restore image comes straight from Apple (only on Apple Silicon Macs, see engines/apple.js).
 
 // Picks the newest file whose name matches `pattern` from a SHA256SUMS-style listing ("<hash> [*]<file>").
@@ -32,6 +32,45 @@ function compareVersions(a, b) {
   return 0;
 }
 
+// Windows: asks microsoft.com for a (24-hour) direct ISO link, the same way its download page does.
+// If Microsoft refuses (it rate-limits automated requests now and then), the error tells the user how to
+// get the ISO from the page instead; `page` is shown as a button on the VM card.
+const MS_LANGUAGES = {
+  "en-US": "English", "en-GB": "English International", en: "English", es: "Spanish", "es-MX": "Spanish (Mexico)",
+  fr: "French", "fr-CA": "French Canadian", de: "German", it: "Italian", "pt-BR": "Brazilian Portuguese", pt: "Portuguese",
+  nl: "Dutch", pl: "Polish", ru: "Russian", uk: "Ukrainian", tr: "Turkish", ar: "Arabic", he: "Hebrew", ja: "Japanese",
+  ko: "Korean", "zh-CN": "Chinese Simplified", "zh-TW": "Chinese Traditional", sv: "Swedish", da: "Danish", nb: "Norwegian",
+  fi: "Finnish", cs: "Czech", el: "Greek", hu: "Hungarian", ro: "Romanian", th: "Thai", vi: "Vietnamese",
+};
+
+const microsoft = (pageName) => async (_arch, fetchText, locale = "en-US") => {
+  const page = `https://www.microsoft.com/en-us/software-download/${pageName}`;
+  const html = await fetchText(page);
+  const edition = html.match(/<option value="(\d+)">[^<]*ISO[^<]*<\/option>/i);
+  if (!edition) throw new Error("Microsoft's download page changed. Use “Choose ISO” with an ISO from microsoft.com instead.");
+
+  const session = require("crypto").randomUUID();
+  // Registers the session with Microsoft's download protection, as the web page does.
+  await fetchText(`https://vlscppe.microsoft.com/tags?org_id=y6jn8c31&session_id=${session}`).catch(() => {});
+
+  const api = "https://www.microsoft.com/software-download-connector/api/";
+  const query = `profile=606624d44113&friendlyFileName=undefined&Locale=en-US&sessionID=${session}`;
+  const { Skus: skus = [] } = JSON.parse(await fetchText(`${api}getskuinformationbyproductedition?${query}&ProductEditionId=${edition[1]}&SKU=undefined`, { referrer: page }));
+  const wanted = [MS_LANGUAGES[locale], MS_LANGUAGES[locale.split("-")[0]], "English"];
+  const sku = wanted.map((lang) => skus.find((s) => s.Language === lang)).find(Boolean) || skus[0];
+  if (!sku) throw new Error("Microsoft didn't list any Windows downloads.");
+
+  const links = JSON.parse(await fetchText(`${api}GetProductDownloadLinksBySku?${query}&productEditionId=undefined&SKU=${sku.Id}`, { referrer: page }));
+  const options = links.ProductDownloadOptions || [];
+  const iso = options.find((o) => /x64/i.test(o.Uri)) || options[0];
+  if (!iso) {
+    throw new Error(
+      "Microsoft's server didn't allow the automatic download this time (it limits how often this works).\n" +
+      "Click “Resume setup” to try again later, or download the ISO on Microsoft's site and click “Choose ISO…”.");
+  }
+  return { url: iso.Uri, file: decodeURIComponent(new URL(iso.Uri).pathname.split("/").pop()) };
+};
+
 const ubuntu = (version) => async (arch, fetchText) => {
   const amd = arch === "x86_64";
   const base = amd ? `https://releases.ubuntu.com/${version}/` : `https://cdimage.ubuntu.com/releases/${version}/release/`;
@@ -45,39 +84,22 @@ const CATALOG = [
     name: "Windows 11",
     family: "windows",
     logo: "windows",
-    blurb: "Microsoft's latest Windows. Bring your own ISO from microsoft.com (free to download).",
+    blurb: "Microsoft's latest Windows, downloaded straight from Microsoft. No product key needed to install.",
     defaults: { cpus: 4, memoryMB: 8192, diskGB: 80 },
     firmware: "uefi",
     // Windows 11 normally refuses to install without TPM 2.0 / Secure Boot; the app answers those checks for you.
     bypassChecks: true,
-    source: {
-      type: "manual",
-      page: "https://www.microsoft.com/software-download/windows11",
-      steps: [
-        "Scroll to “Download Windows 11 Disk Image (ISO) for x64 devices”.",
-        "Pick “Windows 11 (multi-edition ISO for x64 devices)” → Confirm.",
-        "Pick your language → Confirm → click “64-bit Download”.",
-        "When it finishes, come back here and click “Choose the ISO file”.",
-      ],
-    },
+    source: { type: "auto", resolve: microsoft("windows11"), page: "https://www.microsoft.com/software-download/windows11" },
   },
   {
     id: "windows10",
     name: "Windows 10",
     family: "windows",
     logo: "windows",
-    blurb: "The classic. Runs well on older or slower computers.",
+    blurb: "The classic, downloaded straight from Microsoft. Runs well on older or slower computers.",
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 64 },
     firmware: "bios",
-    source: {
-      type: "manual",
-      page: "https://www.microsoft.com/software-download/windows10ISO",
-      steps: [
-        "Under “Select edition”, pick Windows 10 → Confirm.",
-        "Pick your language → Confirm → click “64-bit Download”.",
-        "When it finishes, come back here and click “Choose the ISO file”.",
-      ],
-    },
+    source: { type: "auto", resolve: microsoft("windows10ISO"), page: "https://www.microsoft.com/software-download/windows10ISO" },
   },
   {
     id: "macos",

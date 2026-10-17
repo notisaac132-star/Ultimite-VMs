@@ -4,8 +4,8 @@ const crypto = require("crypto");
 const fs = require("fs");
 const { once } = require("events");
 
-async function fetchText(url) {
-  const res = await net.fetch(url, { cache: "no-store" });
+async function fetchText(url, { referrer } = {}) {
+  const res = await net.fetch(url, { cache: "no-store", ...(referrer && { headers: { Referer: referrer } }) });
   if (!res.ok) throw new Error(`${url} answered ${res.status}`);
   return res.text();
 }
