@@ -488,8 +488,16 @@ $("#open-picker").addEventListener("click", openPicker);
 let updateDismissed = false;
 function renderUpdate(u) {
   if (!u) return;
-  $("#version").textContent = u.state === "checking" ? `v${state.version} · checking…` : u.state === "latest" ? `v${state.version} · up to date` : `v${state.version}`;
-  const show = { downloading: true, ready: true, manual: true }[u.state] && !(updateDismissed && u.state !== "ready");
+  const label = {
+    checking: " · checking…",
+    latest: " · up to date",
+    downloading: ` · downloading ${u.version}…`,
+    ready: ` · ${u.version} ready`,
+    error: " · couldn't check for updates",
+  }[u.state] || "";
+  $("#version").textContent = `v${state.version}${label}`;
+  $("#version").title = u.state === "error" ? `${u.message}\nClick to try again.` : "Check for updates";
+  const show = { downloading: true, ready: true, manual: true, error: !!u.manual }[u.state] && !(updateDismissed && u.state !== "ready" && u.state !== "error");
   $("#update").hidden = !show;
   if (!show) return;
   $("#update-bar").hidden = u.state !== "downloading";
@@ -503,6 +511,10 @@ function renderUpdate(u) {
     $("#update-title").textContent = `Ultimate VMs ${u.version} is ready`;
     $("#update-text").textContent = "Restart to finish updating (takes a few seconds). It also installs by itself next time you close the app.";
     $("#update-go").textContent = "Restart and update";
+  } else if (u.state === "error") {
+    $("#update-title").textContent = "Couldn't check for updates";
+    $("#update-text").textContent = `${u.message || "Unknown problem."} You can also download the newest version from GitHub.`;
+    $("#update-go").textContent = "Download from GitHub";
   } else {
     $("#update-title").textContent = `Ultimate VMs ${u.version} is out`;
     $("#update-text").textContent = u.message || "";
@@ -513,7 +525,7 @@ vmApi.onUpdateStatus(renderUpdate);
 $("#update-later").addEventListener("click", () => { updateDismissed = true; $("#update").hidden = true; });
 $("#update-go").addEventListener("click", async () => {
   const u = await vmApi.updateStatus();
-  if (u.state === "manual") return vmApi.openReleases();
+  if (u.state === "manual" || u.state === "error") return vmApi.openReleases();
   const r = await vmApi.installUpdate();
   if (r.blocked) alert("Shut down your running VMs first, then click “Restart and update” again.");
 });

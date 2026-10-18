@@ -16,15 +16,29 @@ const path = require("path");
 
 const REPO = "notisaac132-star/Ultimite-VMs";
 const RELEASES = `https://github.com/${REPO}/releases/latest`;
-const CHECK_EVERY = 4 * 60 * 60 * 1000;
+const CHECK_EVERY = 60 * 60 * 1000; // plus a check whenever the window is clicked into, at most every 10 minutes
+const MIN_GAP = 10 * 60 * 1000;
 
 let status = { state: "idle", version: null };
 let notify = () => {};
 let installNow = null; // set once an update is ready
 let checking = false;
+let lastCheck = 0;
+
+// What happened, for diagnosing "it doesn't update": <app data>/updater.log (see also the version label).
+function log(...parts) {
+  try {
+    const file = path.join(app.getPath("userData"), "updater.log");
+    if (fs.existsSync(file) && fs.statSync(file).size > 200_000) fs.rmSync(file);
+    fs.appendFileSync(file, `${new Date().toISOString()} v${app.getVersion()} ${parts.join(" ")}\n`);
+  } catch {
+    // logging must never break updating
+  }
+}
 
 function set(next) {
   status = { ...status, ...next, current: app.getVersion() };
+  log(status.state, status.version || "", status.percent ?? "", status.message || "");
   notify(status);
 }
 
@@ -43,12 +57,14 @@ function electronUpdater() {
   ({ autoUpdater } = require("electron-updater"));
   autoUpdater.autoDownload = true;
   autoUpdater.autoInstallOnAppQuit = true; // also installs when the app is simply closed
+  autoUpdater.logger = { info: (m) => log("[updater]", m), warn: (m) => log("[updater] warn", m), error: (m) => log("[updater] error", m), debug() {} };
   autoUpdater.on("checking-for-update", () => set({ state: "checking" }));
   autoUpdater.on("update-not-available", () => set({ state: "latest" }));
   autoUpdater.on("update-available", (i) => set({ state: "downloading", version: i.version, percent: 0 }));
   autoUpdater.on("download-progress", (p) => set({ state: "downloading", percent: Math.round(p.percent) }));
   autoUpdater.on("update-downloaded", (i) => {
-    installNow = () => autoUpdater.quitAndInstall(false, true);
+    // Silent: the installer has a wizard (it asks which OSes you want), which an update must not show.
+    installNow = () => autoUpdater.quitAndInstall(true, true);
     set({ state: "ready", version: i.version });
   });
   autoUpdater.on("error", (err) => set({ state: "error", message: String(err?.message || err).split("\n")[0] }));
@@ -125,9 +141,13 @@ async function portableCheck() {
 
 // ---------- Public ----------
 
-async function check() {
-  if (!app.isPackaged || checking || status.state === "ready") return status;
+// force: the user clicked "check now". Otherwise checks are skipped if one just happened.
+async function check({ force = false } = {}) {
+  if (!app.isPackaged || checking || status.state === "ready" || status.state === "downloading") return status;
+  if (!force && Date.now() - lastCheck < MIN_GAP) return status;
   checking = true;
+  lastCheck = Date.now();
+  status = { ...status, manual: force };
   try {
     if (process.platform === "darwin") {
       set({ state: "checking" });
@@ -150,6 +170,7 @@ function setupAutoUpdates(onStatus) {
   notify = onStatus;
   set({ state: app.isPackaged ? "idle" : "dev" });
   if (!app.isPackaged) return;
+  log("started, packaged", app.isPackaged, process.env.PORTABLE_EXECUTABLE_DIR ? "(portable)" : "");
   setTimeout(check, 5000);
   setInterval(check, CHECK_EVERY);
 }

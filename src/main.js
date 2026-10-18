@@ -64,7 +64,7 @@ ipcMain.handle("first-run-picks", () => {
 });
 
 ipcMain.handle("update-status", () => updater.status());
-ipcMain.handle("update-check", () => updater.check());
+ipcMain.handle("update-check", () => updater.check({ force: true }));
 ipcMain.handle("update-open", () => updater.openReleases());
 ipcMain.handle("update-install", () => {
   if (vms.anyRunning()) return { blocked: true };
@@ -132,6 +132,7 @@ function createWindow() {
     },
   });
   win.loadFile(path.join(__dirname, "ui", "index.html"));
+  win.on("focus", () => updater.check()); // throttled inside
   // Links never open inside the app.
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https:\/\//.test(url)) shell.openExternal(url);
