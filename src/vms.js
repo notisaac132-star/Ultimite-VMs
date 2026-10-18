@@ -7,6 +7,7 @@ const path = require("path");
 const catalog = require("./catalog");
 const host = require("./host");
 const { download, fetchText, resolveRedirect, unzipLargest } = require("./download");
+const msbrowser = require("./msbrowser");
 const qemu = require("./engines/qemu");
 const apple = require("./engines/apple");
 const autoinstall = require("./autoinstall");
@@ -66,6 +67,17 @@ function changed(id) {
 function setJob(id, job) {
   liveOf(id).job = job;
   changed(id);
+}
+
+// What the download steps tried, for diagnosing "it can't get the ISO": <app data>/downloads.log.
+function downloadLog(message) {
+  try {
+    const file = path.join(app.getPath("userData"), "downloads.log");
+    if (fs.existsSync(file) && fs.statSync(file).size > 200_000) fs.rmSync(file);
+    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
+  } catch {
+    // logging must never break setup
+  }
 }
 
 const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40) || "vm";
@@ -139,7 +151,13 @@ async function prepare(id) {
       step(`Finding the newest ${entry.name}…`);
       // Hands-free installs may need a different disc (e.g. Fedora's network installer).
       const resolve = (vm.autoInstall && entry.source.resolveInstaller) || entry.source.resolve;
-      const found = await resolve(vm.guestArch, fetchText, app.getLocale(), { resolveRedirect });
+      const found = await resolve(vm.guestArch, fetchText, app.getLocale(), {
+        resolveRedirect,
+        browserLink: msbrowser.getIsoLink,
+        step,
+        signal: abort.signal,
+        log: downloadLog,
+      });
       vm.iso = await fetchDisc(found, entry.name, step, abort.signal);
       if (found.culture) vm.culture = found.culture;
       if (found.trial) vm.trial = true; // Evaluation Edition: no product key to enter, runs 90 days

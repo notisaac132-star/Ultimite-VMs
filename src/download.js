@@ -4,9 +4,10 @@ const crypto = require("crypto");
 const fs = require("fs");
 const { once } = require("events");
 
-// Looks like a normal Firefox on Windows: Microsoft's download protection turns away anything that doesn't.
+// Looks like a normal Firefox: Microsoft's download protection turns away anything that doesn't.
 const BROWSER_HEADERS = {
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+  // Not a Windows browser: Microsoft's Windows 10 page only offers an ISO to those.
+  "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0",
   Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
   "Accept-Language": "en-US,en;q=0.5",
 };

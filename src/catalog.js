@@ -75,44 +75,93 @@ async function microsoftOnce(pageName, fetchText, locale) {
   const links = JSON.parse(await fetchText(`${api}GetProductDownloadLinksBySku?${query}&productEditionId=undefined&SKU=${sku.Id}`, { referrer: page }));
   const options = links.ProductDownloadOptions || [];
   const iso = options.find((o) => /x64/i.test(o.Uri)) || options[0];
-  if (!iso) return null;
+  if (!iso) {
+    const keys = (links.Errors || []).map((e) => e.Key).join(", ");
+    // (Not flagged as "blocked": plain requests are rejected for many reasons, and a real browser may still get through.)
+    throw new Error(`Microsoft answered: ${keys || "no download options"}`);
+  }
   return { url: iso.Uri, file: decodeURIComponent(new URL(iso.Uri).pathname.split("/").pop()), culture: match?.culture || "en-US" };
 }
 
 // Windows ISO sources, tried in this order until one works:
-//   1. Microsoft's regular download (the real, retail Windows). Retried with fresh sessions, because its
-//      download protection turns away a good share of requests at random.
-//   2. Microsoft's Evaluation Center ISO: direct links without that protection. It's Windows Enterprise
-//      that runs 90 days without a key (then shows a watermark); same Windows, same features.
-//   3. The user downloads it in their browser (the VM card's "Choose ISO…").
-const microsoft = (pageName, evalLinks) => async (_arch, fetchText, locale = "en-US", { resolveRedirect } = {}) => {
-  let lastError = null;
-  for (let attempt = 0; attempt < 4; attempt++) {
+//   1. Microsoft's own download page, run in a hidden real browser window (see msbrowser.js). Its protection
+//      accepts that, because it is what a person's browser does.
+//   2. The same calls the page makes, as plain web requests (one try; this is what Microsoft rejects most).
+//   3. Microsoft's Evaluation Center ISO: direct links without that protection. It's Windows Enterprise that
+//      runs 90 days without a key (then shows a watermark); same Windows, same features.
+//   4. The Microsoft page shown in a window, so the user clicks through it and the app takes the download.
+//   Only if all of that fails does the user have to download the ISO themselves ("Choose ISO…").
+const microsoft = (pageName, evalLinks) => async (_arch, fetchText, locale = "en-US", helpers = {}) => {
+  const { resolveRedirect, browserLink, step = () => {}, signal, log = () => {} } = helpers;
+  const page = `https://www.microsoft.com/en-us/software-download/${pageName}`;
+  const wanted = [MS_LANGUAGES[locale], MS_LANGUAGES[locale.split("-")[0]], MS_LANGUAGES.en].filter(Boolean);
+  const cultureOf = (language) => (wanted.find(([name]) => name === language) || MS_LANGUAGES.en)[1];
+  const fileOf = (url) => decodeURIComponent(new URL(url).pathname.split("/").pop());
+  const problems = [];
+  const note = (where, err) => {
+    log(`${pageName}: ${where} failed: ${err.message}`);
+    problems.push(err);
+  };
+  const cancelled = (err) => err?.message === "Cancelled";
+
+  if (browserLink) {
     try {
-      const found = await microsoftOnce(pageName, fetchText, locale);
-      if (found) return found;
+      const { url, language } = await browserLink({ page, languages: wanted.map(([n]) => n), onStatus: step, signal });
+      log(`${pageName}: got the link through the browser`);
+      return { url, file: fileOf(url), culture: cultureOf(language) };
     } catch (err) {
-      lastError = err;
+      if (cancelled(err)) throw err;
+      note("the browser", err);
     }
-    await wait(2000 * (attempt + 1));
   }
 
-  for (const link of evalLinks || []) {
-    try {
-      const { url, size } = await resolveRedirect(link);
-      // A real Windows disc is a multi-gigabyte .iso; anything else (an error page, a changed link) is skipped.
-      if (/\.iso($|\?)/i.test(url) && size > 3 * GIB) {
-        return { url, file: decodeURIComponent(new URL(url).pathname.split("/").pop()), culture: "en-US", trial: true };
+  step("Asking Microsoft for the download…");
+  try {
+    const found = await microsoftOnce(pageName, fetchText, locale);
+    if (found) {
+      log(`${pageName}: got the link through plain requests`);
+      return found;
+    }
+    note("plain requests", new Error("Microsoft's protection rejected the request"));
+  } catch (err) {
+    note("plain requests", err);
+  }
+
+  if (resolveRedirect) {
+    step("Trying Microsoft's free evaluation version…");
+    for (const link of evalLinks || []) {
+      try {
+        const { url, size } = await resolveRedirect(link);
+        // A real Windows disc is a multi-gigabyte .iso; anything else (an error page, a changed link) is skipped.
+        if (/\.iso($|\?)/i.test(url) && size > 3 * GIB) {
+          log(`${pageName}: using the evaluation ISO ${url}`);
+          return { url, file: fileOf(url), culture: "en-US", trial: true };
+        }
+        note("evaluation link", new Error(`it led to ${url} (${size} bytes), not a Windows disc`));
+      } catch (err) {
+        note("evaluation link", err);
       }
+    }
+  }
+
+  const blocked = problems.some((e) => e.blocked);
+  if (browserLink && !blocked) {
+    try {
+      const { url, language } = await browserLink({ page, languages: wanted.map(([n]) => n), onStatus: step, signal, interactive: true });
+      log(`${pageName}: got the link from the visible window`);
+      return { url, file: fileOf(url), culture: cultureOf(language) };
     } catch (err) {
-      lastError = err;
+      if (cancelled(err)) throw err;
+      note("the visible window", err);
     }
   }
 
   throw new Error(
-    "Microsoft's servers didn't hand out the Windows download (they limit automated downloads, and it can take a few tries).\n" +
-    "Click “Resume setup” to try again, or download the ISO on Microsoft's site and click “Choose ISO…”." +
-    (lastError ? `\n(${lastError.message})` : ""));
+    (blocked
+      ? "Microsoft is refusing automatic Windows downloads from this internet connection (their protection blocks some networks, VPNs and busy times).\n"
+      : "Couldn't get the Windows download from Microsoft.\n") +
+    "Click “Resume setup” to try again, or download the ISO on Microsoft's site and click “Choose ISO…”.\n" +
+    `(${problems.map((e) => e.message).join("; ")})`);
 };
 
 // Microsoft Evaluation Center direct links (Windows 11 / 10 Enterprise, English).

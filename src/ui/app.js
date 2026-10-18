@@ -311,7 +311,7 @@ function renderDisc() {
   const canDownload = picked.source.type !== "manual";
   const kind = FILE_KIND[picked.family] || { label: "install disc (.iso)", hint: "Any .iso file on this computer." };
   const autoText = {
-    windows: "The newest version is downloaded straight from Microsoft (about 7 GB). During setup, click <b>“I don't have a product key”</b>. If Microsoft limits downloads, the app tries again and then uses Microsoft's free 90-day trial version.",
+    windows: "The newest version is downloaded straight from Microsoft (about 7 GB). During setup, click <b>“I don't have a product key”</b>. If Microsoft's page needs you to click something, it opens in a window and the app takes the download from there.",
     macos: "The newest macOS (about 15 GB) is downloaded from Apple and installed for you.",
     chromeos: "The newest ChromeOS Flex is downloaded from Google (about 1.5 GB).",
   }[picked.family] || "The newest version is downloaded from the official site and checked before it's used.";
