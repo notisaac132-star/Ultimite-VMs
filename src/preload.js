@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld("vmApi", {
   remove: call("vm-delete"),
   showFolder: call("vm-show-folder"),
   pickIso: call("pick-iso"),
+  pickFiles: call("pick-files"),
   openUrl: call("open-url"),
   installQemu: call("install-qemu"),
   checkEngines: call("check-engines"),

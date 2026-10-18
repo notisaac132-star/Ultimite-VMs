@@ -3,7 +3,7 @@
 //
 // The helper prints one status line at a time:  PROGRESS <0..1> <text> | STATUS <text> | ERROR <text> | URL <url>
 const { app } = require("electron");
-const { spawn } = require("child_process");
+const { spawn, execFile } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const { info } = require("../host");
@@ -63,10 +63,24 @@ function installMacOS(vm, dir, ipsw, { onProgress, signal }) {
   );
 }
 
-function start(vm, dir, { onExit }) {
+// Test files (see vms.js) go into the VM as a read-only disc made with hdiutil.
+async function buildSamplesDisc(vm, dir) {
+  const iso = path.join(dir, "samples.iso");
+  fs.rmSync(iso, { force: true });
+  if (!vm.samples?.length) return null;
+  await new Promise((resolve, reject) =>
+    execFile("/usr/bin/hdiutil", ["makehybrid", "-iso", "-joliet", "-default-volume-name", "SAMPLES", "-o", iso, path.join(dir, "samples")],
+      (err, _out, stderr) => (err ? reject(new Error(`Couldn't pack the test files: ${String(stderr || err.message).trim()}`)) : resolve())));
+  return iso;
+}
+
+async function start(vm, dir, { onExit }) {
   const args = ["run", dir, "--os", vm.family === "macos" ? "macos" : "linux", "--name", vm.name,
     "--cpus", String(vm.cpus), "--memory", String(vm.memoryMB), "--disk", String(vm.diskGB)];
   if (vm.iso && vm.family !== "macos") args.push("--iso", vm.iso);
+  const samples = await buildSamplesDisc(vm, dir);
+  if (samples) args.push("--extra", samples);
+  if (vm.isolate) args.push("--no-network", "1");
   const child = spawn(helperPath(), args);
   let log = "";
   child.stdout.on("data", (d) => { log = (log + d).slice(-8000); });

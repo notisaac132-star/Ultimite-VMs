@@ -50,6 +50,7 @@ function card(vm) {
       hints.push(`<p class="note warn">Running without hardware acceleration, so it's <b>very slow</b> (Windows can take 30+ minutes just to start). ${state.host.platform === "win32" ? "Shut it down, click <b>Turn on fast mode</b> at the top, then restart your computer." : "Turn on virtualization (VT-x / AMD-V) in your BIOS."}</p>`);
     }
     hint(`The VM opens in its own window${state.host.platform === "win32" ? " (look for “QEMU” in your taskbar)" : ""}.`);
+    if (vm.samples?.length) hint(`Your test file${vm.samples.length === 1 ? " is" : "s are"} on the VM's read-only drive: open <b>File Explorer → the USB drive</b> in Windows, or the drive that appears on the desktop in Linux. Copy ${vm.samples.length === 1 ? "it" : "them"} onto the VM's desktop to run.`);
     if (vm.iso && !vm.installed) {
       if (vm.unattended) hint("Windows is installing itself. Just wait: it restarts a few times and ends on the desktop (about 20–40 minutes).");
       else if (vm.autoInstall) hint("Installing by itself, no need to click anything. The window closes when it's done and the VM restarts into the new system (log in: <b>user</b> / <b>user</b>).");
@@ -72,6 +73,8 @@ function card(vm) {
     <div class="chips">
       <span>${vm.cpus} CPU${vm.cpus === 1 ? "" : "s"}</span><span>${gb(vm.memoryMB)} RAM</span><span>${vm.diskGB} GB disk</span>
       ${vm.iso ? `<span title="${esc(vm.iso)}">💿 disc in</span>` : ""}
+      ${vm.samples?.length ? `<span title="${esc(vm.samples.map((f) => f.name).join(", "))}">📎 ${vm.samples.length} test file${vm.samples.length === 1 ? "" : "s"}</span>` : ""}
+      ${vm.isolate ? `<span title="No internet or network access for this VM">🔒 no network</span>` : ""}
       ${vm.trial ? `<span title="Windows Enterprise Evaluation from Microsoft: runs for 90 days without a key">90-day trial</span>` : ""}
     </div>
     ${job}${error}${hints.join("")}
@@ -209,6 +212,27 @@ const wizard = $("#wizard");
 let picked = null; // catalog entry
 let pickedIso = null; // Advanced Setup: the user's own file (null = download automatically)
 let useOwnFile = true;
+let pickedFiles = []; // test files for the new VM: [{ path, name, size }]
+
+const mb = (bytes) => (bytes < 1024 * 1024 ? `${Math.max(1, Math.round(bytes / 1024))} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`);
+
+// A list of files with a ✕ on each; `onRemove(index)` is called when one is removed.
+function renderFileList(el, files, onRemove) {
+  el.innerHTML = files.map((f, i) => `<div class="file-row"><span class="name" title="${esc(f.path || f.name)}">${esc(f.name)}</span><span class="size">${mb(f.size)}</span><button type="button" class="icon-btn" data-rm="${i}" aria-label="Remove">✕</button></div>`).join("");
+  el.querySelectorAll("[data-rm]").forEach((b) => b.addEventListener("click", () => onRemove(Number(b.dataset.rm))));
+}
+
+function renderPickedFiles() {
+  renderFileList($("#cfg-files"), pickedFiles, (i) => { pickedFiles.splice(i, 1); renderPickedFiles(); });
+}
+$("#cfg-add-files").addEventListener("click", async () => {
+  const added = await vmApi.pickFiles();
+  if (!added.length) return;
+  const had = pickedFiles.length;
+  for (const f of added) if (!pickedFiles.some((p) => p.path === f.path)) pickedFiles.push(f);
+  if (!had) $("#cfg-isolate").checked = true; // the first file turns network blocking on; the person can untick it
+  renderPickedFiles();
+});
 
 function osTile(os) {
   const off = !os.engine;
@@ -266,6 +290,9 @@ function openAdvanced() {
   let name = base;
   for (let n = 2; taken.has(name); n++) name = `${base} ${n}`;
   $("#cfg-name").value = name;
+  pickedFiles = [];
+  $("#cfg-isolate").checked = false;
+  renderPickedFiles();
   setupSliders("cfg", picked.defaults);
   renderDisc();
   showStep("config");
@@ -378,6 +405,8 @@ $("#wizard-form").addEventListener("submit", async (e) => {
       memoryMB: Number($("#cfg-mem").value),
       diskGB: Number($("#cfg-disk").value),
       iso: own ? pickedIso : null,
+      samples: pickedFiles.map((f) => f.path),
+      isolate: $("#cfg-isolate").checked,
     });
     vms.set(vm.id, vm);
     render();
@@ -404,8 +433,28 @@ function openSettings(vm) {
   $("#set-iso-change").hidden = macos;
   $("#set-iso-eject").hidden = macos;
   $("#settings-error").hidden = true;
+  editFiles = { remove: [], add: [] };
+  $("#set-isolate").checked = !!vm.isolate;
+  renderSetFiles();
   settings.showModal();
 }
+
+// Test files in the settings dialog: the VM's current ones (minus any marked for removal) plus newly added ones.
+let editFiles = { remove: [], add: [] };
+function renderSetFiles() {
+  const current = (editing.samples || []).filter((f) => !editFiles.remove.includes(f.name)).map((f) => ({ ...f, existing: true }));
+  const all = [...current, ...editFiles.add];
+  renderFileList($("#set-files"), all, (i) => {
+    const f = all[i];
+    if (f.existing) editFiles.remove.push(f.name);
+    else editFiles.add = editFiles.add.filter((a) => a.path !== f.path);
+    renderSetFiles();
+  });
+}
+$("#set-add-files").addEventListener("click", async () => {
+  for (const f of await vmApi.pickFiles()) if (!editFiles.add.some((a) => a.path === f.path)) editFiles.add.push(f);
+  renderSetFiles();
+});
 
 function renderSetIso() {
   $("#set-iso").textContent = editIso || (editing.family === "macos" ? "Not needed for macOS" : "No disc");
@@ -426,6 +475,9 @@ $("#settings-form").addEventListener("submit", async (e) => {
     diskGB: Number($("#set-disk").value),
   };
   if (editIso !== editing.iso) changes.iso = editIso;
+  if (editFiles.remove.length) changes.removeSamples = editFiles.remove;
+  if (editFiles.add.length) changes.addSamples = editFiles.add.map((f) => f.path);
+  if ($("#set-isolate").checked !== !!editing.isolate) changes.isolate = $("#set-isolate").checked;
   try {
     await vmApi.update(editing.id, changes);
     settings.close();

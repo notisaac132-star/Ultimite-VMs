@@ -104,6 +104,15 @@ ipcMain.handle("pick-iso", async (_e, family) => {
   return canceled ? null : filePaths[0];
 });
 
+// Test files for a VM (e.g. something suspicious to check): any files, several at once.
+ipcMain.handle("pick-files", async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog(win, {
+    title: "Choose files to put inside the VM",
+    properties: ["openFile", "multiSelections"],
+  });
+  return canceled ? [] : filePaths.map((p) => ({ path: p, name: path.basename(p), size: fs.statSync(p).size }));
+});
+
 ipcMain.handle("open-url", (_e, url) => {
   if (typeof url === "string" && /^https:\/\//.test(url)) shell.openExternal(url);
 });

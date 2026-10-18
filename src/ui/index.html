@@ -137,6 +137,19 @@
         </div>
 
         <div id="disc" class="disc"></div>
+
+        <div class="disc" id="test-files">
+          <b>Files to test inside the VM <span class="muted">(optional)</span></b>
+          <p class="muted">Want to see what a suspicious file does? Add it here. It's copied into the VM as a <b>read-only drive</b> (a USB drive on Windows and Linux), so your original is never touched and the file can't change the drive.</p>
+          <div id="cfg-files" class="file-list"></div>
+          <div class="disc-row">
+            <button type="button" id="cfg-add-files" class="btn ghost small">＋ Add files…</button>
+          </div>
+          <label class="check">
+            <input type="checkbox" id="cfg-isolate">
+            <span><b>Block the VM's internet and network access</b> (recommended for anything you don't trust)</span>
+          </label>
+        </div>
       </div>
 
       <p id="wizard-error" class="note error" hidden></p>
@@ -201,6 +214,16 @@
           <button type="button" id="set-iso-eject" class="btn ghost small">Eject</button>
         </div>
       </div>
+      <div class="field" id="set-files-box">
+        <span>Test files in this VM</span>
+        <div id="set-files" class="file-list"></div>
+        <div class="disc-row"><button type="button" id="set-add-files" class="btn ghost small">＋ Add files…</button></div>
+        <small class="muted">They show up as a read-only drive the next time the VM starts.</small>
+      </div>
+      <label class="check">
+        <input type="checkbox" id="set-isolate">
+        <span><b>Block the VM's internet and network access</b></span>
+      </label>
       <p id="settings-error" class="note error" hidden></p>
       <footer class="modal-foot">
         <span class="spacer"></span>

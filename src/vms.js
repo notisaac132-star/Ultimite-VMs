@@ -85,7 +85,7 @@ const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^
 // Creates the VM and starts preparing it (downloading its disc, creating its disk) in the background.
 // Quick Setup (quick: true) uses the recommended settings, installs Windows by itself and starts the VM
 // as soon as it's ready. Advanced Setup takes the user's settings and, optionally, their own ISO.
-function create({ osId, quick, name, cpus, memoryMB, diskGB, iso, deferPrepare }) {
+async function create({ osId, quick, name, cpus, memoryMB, diskGB, iso, deferPrepare, samples, isolate }) {
   const entry = catalog.byId(osId);
   if (!entry) throw new Error("Unknown operating system.");
   const plan = host.plan(entry, { quick });
@@ -113,13 +113,71 @@ function create({ osId, quick, name, cpus, memoryMB, diskGB, iso, deferPrepare }
     memoryMB: clamp(settings.memoryMB, 512, Math.max(1024, host.info.memoryMB - 1024)),
     diskGB: clamp(settings.diskGB, 8, 2048),
     iso: (!quick && iso) || null,
+    // Files to test inside the VM (see "Test files" below): copies kept in the VM's own "samples" folder.
+    samples: [],
+    // Blocks all network access for the VM (needed when opening something suspicious).
+    isolate: !!isolate,
     ready: false,
     installed: false,
     createdAt: Date.now(),
   };
   save(vm);
+  // Copied before setup starts, so setup's own saves of vm.json never overwrite them.
+  if (samples?.length) {
+    try {
+      Object.assign(vm, { samples: await copySamples(vm.id, [], samples) });
+      save(vm);
+    } catch (err) {
+      fs.rmSync(folderOf(vm.id), { recursive: true, force: true });
+      throw err;
+    }
+  }
   if (!deferPrepare) prepare(vm.id);
   return view(vm);
+}
+
+// ---------- Test files ----------
+// Files added when making a VM (e.g. something to check for malware) are copied into <VM folder>/samples and
+// shown to the VM as a read-only USB drive (QEMU) or disc (Apple). The originals are never touched, and a
+// VM can't write to the drive, so nothing the file does can reach back out through it.
+const MAX_SAMPLES_BYTES = 450 * 1024 * 1024; // the virtual FAT drive is 504 MiB, and needs room for itself
+const samplesDir = (id) => path.join(folderOf(id), "samples");
+
+// Copies `paths` into the VM's samples folder next to the `existing` list; returns the new list [{ name, size }].
+// Everything is checked before anything is copied, and a failure part-way removes what this call copied.
+async function copySamples(id, existing, paths) {
+  const dir = samplesDir(id);
+  const sources = paths.map((source) => ({ source, stat: fs.statSync(source) }));
+  for (const { source, stat } of sources) {
+    if (!stat.isFile()) throw new Error(`${path.basename(source)} isn't a file. Add files one by one (zip a folder first).`);
+  }
+  const total = [...existing, ...sources.map((s) => ({ size: s.stat.size }))].reduce((sum, f) => sum + f.size, 0);
+  if (total > MAX_SAMPLES_BYTES) throw new Error("Too much to put in the VM: the files can add up to 450 MB at most.");
+
+  fs.mkdirSync(dir, { recursive: true });
+  const list = [...existing];
+  const copied = [];
+  try {
+    for (const { source, stat } of sources) {
+      let name = path.basename(source).replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+      for (let n = 2; list.some((f) => f.name.toLowerCase() === name.toLowerCase()); n++) {
+        name = `${path.parse(source).name} (${n})${path.extname(source)}`;
+      }
+      await fs.promises.copyFile(source, path.join(dir, name));
+      copied.push(name);
+      list.push({ name, size: stat.size });
+    }
+  } catch (err) {
+    for (const name of copied) fs.rmSync(path.join(dir, name), { force: true });
+    throw err;
+  }
+  return list;
+}
+
+function removeSamples(id, existing, names) {
+  const dir = samplesDir(id);
+  for (const name of names) fs.rmSync(path.join(dir, path.basename(name)), { force: true });
+  return existing.filter((f) => !names.includes(f.name));
 }
 
 function uniqueName(base) {
@@ -220,7 +278,7 @@ async function createMany(osIds) {
   const created = [];
   for (const osId of osIds) {
     try {
-      created.push(create({ osId, quick: true, deferPrepare: true }));
+      created.push(await create({ osId, quick: true, deferPrepare: true }));
     } catch (err) {
       created.push({ osId, error: err.message });
     }
@@ -329,6 +387,12 @@ async function update(id, changes) {
     if (!vm.iso) vm.installed = true; // ejecting the disc means setup is done
   }
   if (grow && vm.engine === "qemu") await qemu.resizeDisk(vm, folderOf(id));
+  if (changes.addSamples?.length || changes.removeSamples?.length) {
+    if (liveOf(id).job) throw new Error("Wait until setup finishes before changing the VM's files.");
+    vm.samples = removeSamples(id, vm.samples || [], changes.removeSamples || []);
+    if (changes.addSamples?.length) vm.samples = await copySamples(id, vm.samples, changes.addSamples);
+  }
+  if ("isolate" in changes) vm.isolate = !!changes.isolate;
   save(vm);
   changed(id);
   // Picking an ISO for a VM whose download failed carries on with its setup.
@@ -359,6 +423,7 @@ module.exports = {
   stop,
   update,
   remove,
+  samplesDir,
   anyRunning,
   onChange: (fn) => { notify = fn; },
 };

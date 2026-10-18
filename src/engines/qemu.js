@@ -95,6 +95,18 @@ async function resizeDisk(vm, dir) {
   if (qemu) await run(qemu.img, ["resize", path.join(dir, "disk.qcow2"), `${vm.diskGB}G`]);
 }
 
+// Packs the VM's test files into a small disk image, with qemu-img reading them as a FAT folder on this computer.
+// (QEMU can also show a folder to a VM live, but its authors say that isn't safe against a hostile guest, and the
+// guest here may well be malware. A finished read-only image never gives the guest a way back to the host.)
+async function buildSamplesImage(vm, dir) {
+  const image = path.join(dir, "samples.qcow2");
+  fs.rmSync(image, { force: true });
+  if (!vm.samples?.length) return;
+  const qemu = find(vm.guestArch);
+  if (!qemu) throw new Error("QEMU isn't installed yet.");
+  await run(qemu.img, ["convert", "-f", "vvfat", "-O", "qcow2", `fat:ro:${path.join(dir, "samples")}`, image]);
+}
+
 function freePort() {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -231,6 +243,12 @@ function buildArgs(vm, dir, qmpPort, boot = null) {
     args.push("-drive", `file=fat:rw:${q(unattend)},if=none,id=ud0,format=raw`, "-device", "usb-storage,drive=ud0");
   }
 
+  // Test files (see vms.js): a read-only USB drive made by buildSamplesImage() just before the VM starts.
+  const samplesImage = path.join(dir, "samples.qcow2");
+  if (vm.samples?.length && fs.existsSync(samplesImage)) {
+    args.push("-drive", `file=${q(samplesImage)},if=none,id=smp0,format=qcow2,readonly=on`, "-device", "usb-storage,drive=smp0");
+  }
+
   if (chromeos) {
     args.push("-device", "virtio-vga");
   } else if (x86) {
@@ -238,9 +256,10 @@ function buildArgs(vm, dir, qmpPort, boot = null) {
   } else {
     args.push("-device", "virtio-gpu-pci", "-device", "usb-kbd");
   }
-  args.push("-nic", `user,model=${pcHardware ? "e1000e" : "virtio-net-pci"}`);
+  args.push("-nic", `user,model=${pcHardware ? "e1000e" : "virtio-net-pci"}${vm.isolate ? ",restrict=on" : ""}`);
   if (windows) args.push("-rtc", "base=localtime");
   args.push(...audioArgs());
+  // (restrict=on, above, cuts the VM off from the internet and from this computer.)
   // A directly booted kernel takes the first boot slot, so the devices drop theirs.
   return boot ? args.map((a) => a.replace(/,bootindex=\d+/, "")) : args;
 }
@@ -273,6 +292,7 @@ async function start(vm, dir, { onExit, onSlow = () => {} }) {
   const qemu = find(vm.guestArch);
   if (!qemu) throw new Error("QEMU isn't installed yet. Click “Install VM engine” at the top of the window.");
   const port = await freePort();
+  await buildSamplesImage(vm, dir);
   const args = buildArgs(vm, dir, port, await autoinstall.prepareBoot(vm, dir));
   // Never windowsHide here: on Windows it hides the VM's own window too, so a running VM would show nothing.
   // The "w" build has no console window; the plain build shows a small console beside the VM window.
@@ -385,4 +405,4 @@ function enableFastMode() {
   });
 }
 
-module.exports = { find, createDisk, resizeDisk, start, install, enableFastMode, buildArgs, unattendXml };
+module.exports = { find, createDisk, buildSamplesImage, resizeDisk, start, install, enableFastMode, buildArgs, unattendXml };

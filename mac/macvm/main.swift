@@ -3,7 +3,7 @@
 //
 //   macvm ipsw-url                                   prints "URL <newest macOS restore image>"
 //   macvm install-macos <dir> --ipsw <file> --cpus N --memory MB --disk GB
-//   macvm run <dir> --os macos|linux --name <title> --cpus N --memory MB --disk GB [--iso <file>]
+//   macvm run <dir> --os macos|linux --name <title> --cpus N --memory MB --disk GB [--iso <file>] [--extra <file>] [--no-network 1]
 //
 // Output for the app, one line each: "PROGRESS <0..1> <text>", "ERROR <text>", "URL <url>".
 // SIGTERM asks the guest to shut down (like pressing its power button).
@@ -103,6 +103,15 @@ func addCommonDevices(_ config: VZVirtualMachineConfiguration, disk: URL) throws
     let sound = VZVirtioSoundDeviceConfiguration()
     sound.streams = [output]
     config.audioDevices = [sound]
+
+    // Test files (the app's "Test files"): a read-only disc, and optionally no network at all.
+    if let extra = flags["extra"] {
+        let disc = try VZDiskImageStorageDeviceAttachment(url: URL(fileURLWithPath: extra), readOnly: true)
+        config.storageDevices.append(VZUSBMassStorageDeviceConfiguration(attachment: disc))
+    }
+    if flags["no-network"] == "1" {
+        config.networkDevices = []
+    }
 
     config.entropyDevices = [VZVirtioEntropyDeviceConfiguration()]
     config.memoryBalloonDevices = [VZVirtioTraditionalMemoryBalloonDeviceConfiguration()]
