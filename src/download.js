@@ -4,10 +4,29 @@ const crypto = require("crypto");
 const fs = require("fs");
 const { once } = require("events");
 
-async function fetchText(url, { referrer } = {}) {
-  const res = await net.fetch(url, { cache: "no-store", ...(referrer && { headers: { Referer: referrer } }) });
+// Looks like a normal Firefox on Windows: Microsoft's download protection turns away anything that doesn't.
+const BROWSER_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+  Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
+  "Accept-Language": "en-US,en;q=0.5",
+};
+
+// referrer: sent as Referer (and its site as Origin). Cookies are kept between calls, like in a browser tab.
+async function fetchText(url, { referrer, headers } = {}) {
+  const res = await net.fetch(url, {
+    cache: "no-store",
+    credentials: "include",
+    headers: { ...BROWSER_HEADERS, ...(referrer && { Referer: referrer, Origin: new URL(referrer).origin }), ...headers },
+  });
   if (!res.ok) throw new Error(`${url} answered ${res.status}`);
   return res.text();
+}
+
+// Follows redirects (e.g. Microsoft's go.microsoft.com links) and reports where they end up.
+async function resolveRedirect(url) {
+  const res = await net.fetch(url, { method: "HEAD", headers: BROWSER_HEADERS, credentials: "include" });
+  if (!res.ok) throw new Error(`${url} answered ${res.status}`);
+  return { url: res.url, size: Number(res.headers.get("content-length") || 0) };
 }
 
 function sha256File(file) {
@@ -104,4 +123,4 @@ function unzipLargest(zipFile, dest, onProgress = () => {}) {
   });
 }
 
-module.exports = { fetchText, download, unzipLargest };
+module.exports = { fetchText, resolveRedirect, download, unzipLargest };

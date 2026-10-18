@@ -50,7 +50,7 @@ Pick the name, processors, memory and disk size, and install from **your own fil
 
 When an OS is installed, shut it down and click **⋯ → Eject disc**. Your VMs live in a folder called **Ultimate VMs** in your home folder. Each card has **Start / Shut down / Force stop**, and the **⋯** menu has **Settings**, **Eject / Insert disc**, **Show files** and **Delete**.
 
-Microsoft sometimes limits automatic downloads. If that happens, the VM card shows **Microsoft's site ↗** and **Choose ISO…** so you can download it in your browser and carry on.
+Microsoft's servers turn away some automated downloads, so for Windows the app tries up to 4 times with fresh sessions, then falls back to Microsoft's own **Evaluation Center** disc (Windows Enterprise, free, runs 90 days without a key; the VM card shows a *90-day trial* tag). If everything is refused, the VM card shows **Microsoft's site ↗** and **Choose ISO…** so you can download it in your browser and carry on.
 
 ### First launch on Windows and Linux
 

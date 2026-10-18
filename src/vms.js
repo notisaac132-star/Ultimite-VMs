@@ -6,7 +6,7 @@ const fs = require("fs");
 const path = require("path");
 const catalog = require("./catalog");
 const host = require("./host");
-const { download, fetchText, unzipLargest } = require("./download");
+const { download, fetchText, resolveRedirect, unzipLargest } = require("./download");
 const qemu = require("./engines/qemu");
 const apple = require("./engines/apple");
 const autoinstall = require("./autoinstall");
@@ -139,9 +139,10 @@ async function prepare(id) {
       step(`Finding the newest ${entry.name}…`);
       // Hands-free installs may need a different disc (e.g. Fedora's network installer).
       const resolve = (vm.autoInstall && entry.source.resolveInstaller) || entry.source.resolve;
-      const found = await resolve(vm.guestArch, fetchText, app.getLocale());
+      const found = await resolve(vm.guestArch, fetchText, app.getLocale(), { resolveRedirect });
       vm.iso = await fetchDisc(found, entry.name, step, abort.signal);
       if (found.culture) vm.culture = found.culture;
+      if (found.trial) vm.trial = true; // Evaluation Edition: no product key to enter, runs 90 days
       save(vm);
     }
 

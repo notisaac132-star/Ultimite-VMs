@@ -47,15 +47,22 @@ const MS_LANGUAGES = {
   el: ["Greek", "el-GR"], hu: ["Hungarian", "hu-HU"], ro: ["Romanian", "ro-RO"], th: ["Thai", "th-TH"],
 };
 
-const microsoft = (pageName) => async (_arch, fetchText, locale = "en-US") => {
+const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+const GIB = 1024 ** 3;
+
+// One try at Microsoft's regular download page API (the same calls its web page makes). Returns null when
+// Microsoft's download protection ("Sentinel") turns the request away.
+async function microsoftOnce(pageName, fetchText, locale) {
   const page = `https://www.microsoft.com/en-us/software-download/${pageName}`;
   const html = await fetchText(page);
   const edition = html.match(/<option value="(\d+)">[^<]*ISO[^<]*<\/option>/i);
-  if (!edition) throw new Error("Microsoft's download page changed. Use “Choose ISO” with an ISO from microsoft.com instead.");
+  if (!edition) throw new Error("Microsoft's download page changed.");
 
   const session = require("crypto").randomUUID();
-  // Registers the session with Microsoft's download protection, as the web page does.
-  await fetchText(`https://vlscppe.microsoft.com/tags?org_id=y6jn8c31&session_id=${session}`).catch(() => {});
+  // Registers the session with Microsoft's download protection, as the web page does, then gives it a
+  // moment (the page's own script does the same before asking for links).
+  await fetchText(`https://vlscppe.microsoft.com/tags?org_id=y6jn8c31&session_id=${session}`, { referrer: page }).catch(() => {});
+  await wait(1500);
 
   const api = "https://www.microsoft.com/software-download-connector/api/";
   const query = `profile=606624d44113&friendlyFileName=undefined&Locale=en-US&sessionID=${session}`;
@@ -63,22 +70,54 @@ const microsoft = (pageName) => async (_arch, fetchText, locale = "en-US") => {
   const wanted = [MS_LANGUAGES[locale], MS_LANGUAGES[locale.split("-")[0]], MS_LANGUAGES.en].filter(Boolean);
   const match = wanted.map(([name, culture]) => ({ culture, sku: skus.find((s) => s.Language === name) })).find((m) => m.sku);
   const sku = match?.sku || skus[0];
-  if (!sku) throw new Error("Microsoft didn't list any Windows downloads.");
+  if (!sku) return null;
 
   const links = JSON.parse(await fetchText(`${api}GetProductDownloadLinksBySku?${query}&productEditionId=undefined&SKU=${sku.Id}`, { referrer: page }));
   const options = links.ProductDownloadOptions || [];
   const iso = options.find((o) => /x64/i.test(o.Uri)) || options[0];
-  if (!iso) {
-    throw new Error(
-      "Microsoft's server didn't allow the automatic download this time (it limits how often this works).\n" +
-      "Click “Resume setup” to try again later, or download the ISO on Microsoft's site and click “Choose ISO…”.");
+  if (!iso) return null;
+  return { url: iso.Uri, file: decodeURIComponent(new URL(iso.Uri).pathname.split("/").pop()), culture: match?.culture || "en-US" };
+}
+
+// Windows ISO sources, tried in this order until one works:
+//   1. Microsoft's regular download (the real, retail Windows). Retried with fresh sessions, because its
+//      download protection turns away a good share of requests at random.
+//   2. Microsoft's Evaluation Center ISO: direct links without that protection. It's Windows Enterprise
+//      that runs 90 days without a key (then shows a watermark); same Windows, same features.
+//   3. The user downloads it in their browser (the VM card's "Choose ISO…").
+const microsoft = (pageName, evalLinks) => async (_arch, fetchText, locale = "en-US", { resolveRedirect } = {}) => {
+  let lastError = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      const found = await microsoftOnce(pageName, fetchText, locale);
+      if (found) return found;
+    } catch (err) {
+      lastError = err;
+    }
+    await wait(2000 * (attempt + 1));
   }
-  return {
-    url: iso.Uri,
-    file: decodeURIComponent(new URL(iso.Uri).pathname.split("/").pop()),
-    culture: match?.culture || "en-US",
-  };
+
+  for (const link of evalLinks || []) {
+    try {
+      const { url, size } = await resolveRedirect(link);
+      // A real Windows disc is a multi-gigabyte .iso; anything else (an error page, a changed link) is skipped.
+      if (/\.iso($|\?)/i.test(url) && size > 3 * GIB) {
+        return { url, file: decodeURIComponent(new URL(url).pathname.split("/").pop()), culture: "en-US", trial: true };
+      }
+    } catch (err) {
+      lastError = err;
+    }
+  }
+
+  throw new Error(
+    "Microsoft's servers didn't hand out the Windows download (they limit automated downloads, and it can take a few tries).\n" +
+    "Click “Resume setup” to try again, or download the ISO on Microsoft's site and click “Choose ISO…”." +
+    (lastError ? `\n(${lastError.message})` : ""));
 };
+
+// Microsoft Evaluation Center direct links (Windows 11 / 10 Enterprise, English).
+const EVAL_WIN11 = ["https://go.microsoft.com/fwlink/?linkid=2289031&clcid=0x409&culture=en-us&country=us"];
+const EVAL_WIN10 = ["https://go.microsoft.com/fwlink/p/?LinkID=2208844&clcid=0x409&culture=en-us&country=US"];
 
 // ChromeOS Flex: the newest stable image from Google's recovery list (a zipped USB-stick image).
 async function chromeosFlex(_arch, fetchText) {
@@ -115,7 +154,7 @@ const CATALOG = [
     // Windows 11 normally refuses to install without TPM 2.0 / Secure Boot; the app answers those checks for you.
     bypassChecks: true,
     unattended: true,
-    source: { type: "auto", resolve: microsoft("windows11"), page: "https://www.microsoft.com/software-download/windows11" },
+    source: { type: "auto", resolve: microsoft("windows11", EVAL_WIN11), page: "https://www.microsoft.com/software-download/windows11" },
   },
   {
     id: "windows10",
@@ -127,7 +166,7 @@ const CATALOG = [
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 64 },
     firmware: "bios",
     unattended: true,
-    source: { type: "auto", resolve: microsoft("windows10ISO"), page: "https://www.microsoft.com/software-download/windows10ISO" },
+    source: { type: "auto", resolve: microsoft("windows10ISO", EVAL_WIN10), page: "https://www.microsoft.com/software-download/windows10ISO" },
   },
   {
     id: "macos",

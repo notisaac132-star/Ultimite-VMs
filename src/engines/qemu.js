@@ -138,7 +138,7 @@ ${component("Microsoft-Windows-International-Core-WinPE", `      <SetupUILanguag
 ${component("Microsoft-Windows-Setup", `${commands(bypass)}
       <DiskConfiguration><Disk wcm:action="add"><DiskID>0</DiskID><WillWipeDisk>true</WillWipeDisk><CreatePartitions>${disk}</ModifyPartitions></Disk></DiskConfiguration>
       <ImageInstall><OSImage><InstallTo><DiskID>0</DiskID><PartitionID>${uefi ? 3 : 1}</PartitionID></InstallTo></OSImage></ImageInstall>
-      <UserData><AcceptEula>true</AcceptEula><ProductKey><Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key><WillShowUI>OnError</WillShowUI></ProductKey></UserData>`)}
+      <UserData><AcceptEula>true</AcceptEula>${vm.trial ? "" : "<ProductKey><Key>VK7JG-NPHTM-C97JM-9MPGT-3V66T</Key><WillShowUI>OnError</WillShowUI></ProductKey>"}</UserData>`)}
   </settings>`);
     passes.push(`  <settings pass="specialize">
 ${component("Microsoft-Windows-Deployment", commands([reg("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\OOBE", "BypassNRO")]))}
