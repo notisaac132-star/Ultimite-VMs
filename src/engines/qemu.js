@@ -42,7 +42,10 @@ function find(guestArch = "x86_64") {
         "/usr/share/edk2/aarch64",
         "/usr/share/qemu-efi-aarch64",
       ];
-      return { system, img, shareDirs };
+      // Windows builds also ship qemu-system-x86_64w.exe: the same program without a console window.
+      const gui = info.platform === "win32" && fs.existsSync(path.join(dir, `qemu-system-${guestArch}w.exe`))
+        ? path.join(dir, `qemu-system-${guestArch}w.exe`) : null;
+      return { system, gui, img, shareDirs };
     }
   }
   return null;
@@ -265,15 +268,29 @@ function qmpConnect(port, tries = 40) {
 }
 
 // Starts the VM in its own window. Returns { stop(), forceStop() } and calls onExit({ code, log, slow }).
-async function start(vm, dir, { onExit }) {
+// onSlow() is called as soon as QEMU reports it couldn't use hardware acceleration (the VM then runs, but slowly).
+async function start(vm, dir, { onExit, onSlow = () => {} }) {
   const qemu = find(vm.guestArch);
   if (!qemu) throw new Error("QEMU isn't installed yet. Click “Install VM engine” at the top of the window.");
   const port = await freePort();
   const args = buildArgs(vm, dir, port, await autoinstall.prepareBoot(vm, dir));
-  const child = spawn(qemu.system, args, { cwd: dir, windowsHide: true });
+  // Never windowsHide here: on Windows it hides the VM's own window too, so a running VM would show nothing.
+  // The "w" build has no console window; the plain build shows a small console beside the VM window.
+  const child = spawn(qemu.gui || qemu.system, args, { cwd: dir });
   let log = "";
-  child.stderr.on("data", (d) => { log = (log + d).slice(-8000); });
-  child.stdout.on("data", (d) => { log = (log + d).slice(-8000); });
+  const SLOW = /falling back to tcg|failed to initialize (whpx|hvf|kvm)|could not access kvm|no accelerator found/i;
+  let warned = false;
+  const collect = (d) => {
+    log = (log + d).slice(-8000);
+    if (!warned && SLOW.test(log)) {
+      warned = true;
+      onSlow();
+    }
+    try { fs.appendFileSync(path.join(dir, "qemu.log"), d); } catch { /* the log is only for troubleshooting */ }
+  };
+  try { fs.rmSync(path.join(dir, "qemu.log"), { force: true }); } catch { /* same */ }
+  child.stderr.on("data", collect);
+  child.stdout.on("data", collect);
 
   let qmp = null;
   let pressKeys = null;

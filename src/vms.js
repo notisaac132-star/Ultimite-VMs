@@ -282,6 +282,7 @@ async function start(id) {
   l.slow = false;
   const started = Date.now();
   l.controller = await engines[vm.engine].start(vm, folderOf(id), {
+    onSlow: () => { l.slow = true; changed(id); },
     onExit: ({ code, log, slow }) => {
       l.running = false;
       l.controller = null;

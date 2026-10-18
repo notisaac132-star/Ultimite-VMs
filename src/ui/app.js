@@ -43,15 +43,21 @@ function card(vm) {
   }
   else primary = `<button class="btn primary" data-act="start">▶ Start</button>`;
 
-  let hint = "";
-  if (vm.status === "running" && vm.iso && !vm.installed) {
-    if (vm.unattended) hint = "Windows is installing itself. Just wait: it restarts a few times and ends on the desktop (about 20–40 minutes).";
-    else if (vm.autoInstall) hint = "Installing by itself, no need to click anything. The window closes when it's done and the VM restarts into the new system (log in: <b>user</b> / <b>user</b>).";
-    else if (vm.family === "linux") hint = "You're in the live desktop. To keep it for good, use the <b>Install</b> icon on its desktop, then shut down and click <b>⋯ → Eject disc</b>.";
-    else if (vm.family === "chromeos") hint = "Pick <b>Try it first</b> to use ChromeOS now, or <b>Install ChromeOS Flex</b> to keep it, then shut down and click <b>⋯ → Eject disc</b>.";
-    else hint = `Follow the steps in the VM's window${vm.family === "windows" ? " (no product key? click <b>“I don't have a product key”</b>)" : ""}. When it's installed, shut down and click <b>⋯ → Eject disc</b>.`;
+  const hints = [];
+  const hint = (html) => hints.push(`<p class="hint">${html}</p>`);
+  if (vm.status === "running") {
+    if (vm.slow) {
+      hints.push(`<p class="note warn">Running without hardware acceleration, so it's <b>very slow</b> (Windows can take 30+ minutes just to start). ${state.host.platform === "win32" ? "Shut it down, click <b>Turn on fast mode</b> at the top, then restart your computer." : "Turn on virtualization (VT-x / AMD-V) in your BIOS."}</p>`);
+    }
+    hint(`The VM opens in its own window${state.host.platform === "win32" ? " (look for “QEMU” in your taskbar)" : ""}.`);
+    if (vm.iso && !vm.installed) {
+      if (vm.unattended) hint("Windows is installing itself. Just wait: it restarts a few times and ends on the desktop (about 20–40 minutes).");
+      else if (vm.autoInstall) hint("Installing by itself, no need to click anything. The window closes when it's done and the VM restarts into the new system (log in: <b>user</b> / <b>user</b>).");
+      else if (vm.family === "linux") hint("You're in the live desktop. To keep it for good, use the <b>Install</b> icon on its desktop, then shut down and click <b>⋯ → Eject disc</b>.");
+      else if (vm.family === "chromeos") hint("Pick <b>Try it first</b> to use ChromeOS now, or <b>Install ChromeOS Flex</b> to keep it, then shut down and click <b>⋯ → Eject disc</b>.");
+      else hint(`Follow the steps in the VM's window${vm.family === "windows" ? " (no product key? click <b>“I don't have a product key”</b>)" : ""}. When it's installed, shut down and click <b>⋯ → Eject disc</b>.`);
+    }
   }
-  if (hint) hint = `<p class="hint">${hint}</p>`;
 
   return `
   <article class="vm-card status-${vm.status}" data-id="${esc(vm.id)}">
@@ -68,7 +74,7 @@ function card(vm) {
       ${vm.iso ? `<span title="${esc(vm.iso)}">💿 disc in</span>` : ""}
       ${vm.trial ? `<span title="Windows Enterprise Evaluation from Microsoft: runs for 90 days without a key">90-day trial</span>` : ""}
     </div>
-    ${job}${error}${hint}
+    ${job}${error}${hints.join("")}
     <div class="vm-actions">
       ${primary}
       ${vm.status === "running" ? `<button class="btn ghost" data-act="force" title="Like pulling the power cord">Force stop</button>` : ""}
