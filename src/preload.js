@@ -6,6 +6,13 @@ const call = (channel) => (...args) => ipcRenderer.invoke(channel, ...args);
 contextBridge.exposeInMainWorld("vmApi", {
   state: call("state"),
   create: call("vm-create"),
+  createMany: call("vm-create-many"),
+  firstRunPicks: call("first-run-picks"),
+  updateStatus: call("update-status"),
+  checkUpdates: call("update-check"),
+  installUpdate: call("update-install"),
+  openReleases: call("update-open"),
+  onUpdateStatus: (fn) => ipcRenderer.on("update-status", (_e, s) => fn(s)),
   prepare: call("vm-prepare"),
   cancel: call("vm-cancel"),
   start: call("vm-start"),

@@ -6,7 +6,8 @@ const host = require("./host");
 const vms = require("./vms");
 const qemu = require("./engines/qemu");
 const apple = require("./engines/apple");
-const { setupAutoUpdates } = require("./updater");
+const updater = require("./updater");
+const fs = require("fs");
 
 let win = null;
 const send = (channel, data) => win && !win.isDestroyed() && win.webContents.send(channel, data);
@@ -23,6 +24,7 @@ function engineStatus() {
 ipcMain.handle("state", () => ({
   host: host.info,
   root: vms.root,
+  version: app.getVersion(),
   engines: engineStatus(),
   catalog: catalog.CATALOG.map((entry) => {
     const plan = host.plan(entry);
@@ -36,6 +38,7 @@ ipcMain.handle("state", () => ({
       logo: entry.logo,
       blurb: entry.blurb,
       quick: entry.quick,
+      quickEngine: host.plan(entry, { quick: true }).engine,
       defaults: entry.defaults,
       source: { type: entry.source.type, page: entry.source.page },
       ...plan,
@@ -45,6 +48,29 @@ ipcMain.handle("state", () => ({
 }));
 
 ipcMain.handle("vm-create", (_e, options) => vms.create(options));
+ipcMain.handle("vm-create-many", (_e, osIds) => vms.createMany(osIds));
+
+// OSes picked on the Windows installer's "Which operating systems?" page (build/installer.nsh writes
+// this file). They're set up once, on the first launch after installing.
+const firstRunFile = path.join(app.getPath("userData"), "first-run.json");
+ipcMain.handle("first-run-picks", () => {
+  try {
+    const picks = JSON.parse(fs.readFileSync(firstRunFile, "utf8")).quick.filter((id) => catalog.byId(id));
+    fs.rmSync(firstRunFile, { force: true });
+    return picks;
+  } catch {
+    return [];
+  }
+});
+
+ipcMain.handle("update-status", () => updater.status());
+ipcMain.handle("update-check", () => updater.check());
+ipcMain.handle("update-open", () => updater.openReleases());
+ipcMain.handle("update-install", () => {
+  if (vms.anyRunning()) return { blocked: true };
+  updater.install();
+  return { ok: true };
+});
 ipcMain.handle("vm-prepare", (_e, id) => { vms.prepare(id); });
 ipcMain.handle("vm-cancel", (_e, id) => vms.cancel(id));
 ipcMain.handle("vm-start", (_e, id) => vms.start(id));
@@ -130,7 +156,7 @@ function createWindow() {
 
 app.whenReady().then(() => {
   createWindow();
-  setupAutoUpdates();
+  updater.setupAutoUpdates((status) => send("update-status", status));
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

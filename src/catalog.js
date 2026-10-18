@@ -100,7 +100,7 @@ const ubuntu = (version) => async (arch, fetchText) => {
 
 // What "Quick Setup" does for each kind of OS (shown before the user clicks it).
 const QUICK_WINDOWS = "Downloads Windows from Microsoft and installs it by itself, with no questions. In about 20–40 minutes you're on the Windows desktop (user “User”, no password).";
-const QUICK_LINUX = (name) => `Downloads ${name} and opens it straight away as a live desktop you can use immediately. To keep it for good, use the “Install” icon on its desktop.`;
+const QUICK_LINUX = (name) => `Downloads ${name} and installs it by itself, with no questions. When it's done you're on the ${name} desktop (user “user”, password “user”).`;
 
 const CATALOG = [
   {
@@ -146,6 +146,7 @@ const CATALOG = [
     logo: "ubuntu",
     blurb: "The most popular Linux desktop. Downloaded automatically.",
     quick: QUICK_LINUX("Ubuntu"),
+    autoInstall: "ubuntu",
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     source: { type: "auto", resolve: ubuntu("26.04") },
   },
@@ -156,6 +157,7 @@ const CATALOG = [
     logo: "ubuntu",
     blurb: "The previous long-term Ubuntu release. Downloaded automatically.",
     quick: QUICK_LINUX("Ubuntu"),
+    autoInstall: "ubuntu",
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     source: { type: "auto", resolve: ubuntu("24.04") },
   },
@@ -166,6 +168,7 @@ const CATALOG = [
     logo: "fedora",
     blurb: "Cutting-edge Linux with the newest GNOME desktop. Downloaded automatically.",
     quick: QUICK_LINUX("Fedora"),
+    autoInstall: "fedora",
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     source: {
       type: "auto",
@@ -178,6 +181,16 @@ const CATALOG = [
         if (!iso) throw new Error("Fedora doesn't offer a Workstation ISO for this computer.");
         return { url: iso.link, sha256: iso.sha256, file: iso.link.split("/").pop() };
       },
+      // Hands-free installs use Fedora's network installer (kickstart doesn't work with the live desktop ISO).
+      resolveInstaller: async (arch, fetchText) => {
+        const releases = JSON.parse(await fetchText("https://fedoraproject.org/releases.json"));
+        const iso = releases
+          .filter((r) => r.variant === "Everything" && r.arch === arch && /^\d+$/.test(r.version) && /netinst.*\.iso$/i.test(r.link))
+          .sort((a, b) => Number(a.version) - Number(b.version))
+          .pop();
+        if (!iso) throw new Error("Fedora doesn't offer a network installer for this computer.");
+        return { url: iso.link, sha256: iso.sha256, file: iso.link.split("/").pop() };
+      },
     },
   },
   {
@@ -187,6 +200,7 @@ const CATALOG = [
     logo: "debian",
     blurb: "Rock-solid, lightweight Linux. Downloaded automatically.",
     quick: QUICK_LINUX("Debian"),
+    autoInstall: "debian",
     defaults: { cpus: 2, memoryMB: 2048, diskGB: 25 },
     source: {
       type: "auto",
@@ -203,6 +217,7 @@ const CATALOG = [
     logo: "mint",
     blurb: "Feels like Windows — great first Linux. Downloaded automatically (Intel/AMD computers only).",
     quick: QUICK_LINUX("Linux Mint"),
+    autoInstall: "mint",
     defaults: { cpus: 2, memoryMB: 4096, diskGB: 30 },
     archs: ["x86_64"],
     source: {

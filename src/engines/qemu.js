@@ -5,6 +5,7 @@ const fs = require("fs");
 const net = require("net");
 const path = require("path");
 const { info } = require("../host");
+const autoinstall = require("../autoinstall");
 
 // Commas separate QEMU options, so commas inside file paths are doubled.
 const q = (file) => String(file).replace(/,/g, ",,");
@@ -168,7 +169,8 @@ function accelArgs(guestArch) {
   return [...(fast ? ["-accel", fast] : []), "-accel", "tcg"];
 }
 
-function buildArgs(vm, dir, qmpPort) {
+// boot: { kernel, initrd, append } to start a Linux installer hands-free (see autoinstall.js).
+function buildArgs(vm, dir, qmpPort, boot = null) {
   const windows = vm.family === "windows";
   // ChromeOS Flex comes as a USB-stick image and wants PC-style (SATA/Intel) hardware with a virtio display.
   const chromeos = vm.family === "chromeos";
@@ -197,6 +199,12 @@ function buildArgs(vm, dir, qmpPort) {
       "-drive", `if=pflash,format=raw,readonly=on,file=${q(fw.code)}`,
       "-drive", `if=pflash,format=raw,file=${q(vars)}`,
     );
+  }
+
+  if (boot) {
+    // Hands-free Linux install: boot the installer's kernel directly. -no-reboot makes QEMU exit when the
+    // installer finishes, so the next start boots the installed system from the disk.
+    args.push("-kernel", boot.kernel, "-initrd", boot.initrd, "-append", boot.append, "-no-reboot");
   }
 
   // The disk boots first; while it's still empty the firmware falls through to the install disc.
@@ -230,7 +238,8 @@ function buildArgs(vm, dir, qmpPort) {
   args.push("-nic", `user,model=${pcHardware ? "e1000e" : "virtio-net-pci"}`);
   if (windows) args.push("-rtc", "base=localtime");
   args.push(...audioArgs());
-  return args;
+  // A directly booted kernel takes the first boot slot, so the devices drop theirs.
+  return boot ? args.map((a) => a.replace(/,bootindex=\d+/, "")) : args;
 }
 
 // Minimal QMP client: connects, enables commands, then sends one JSON command per call.
@@ -260,7 +269,7 @@ async function start(vm, dir, { onExit }) {
   const qemu = find(vm.guestArch);
   if (!qemu) throw new Error("QEMU isn't installed yet. Click “Install VM engine” at the top of the window.");
   const port = await freePort();
-  const args = buildArgs(vm, dir, port);
+  const args = buildArgs(vm, dir, port, await autoinstall.prepareBoot(vm, dir));
   const child = spawn(qemu.system, args, { cwd: dir, windowsHide: true });
   let log = "";
   child.stderr.on("data", (d) => { log = (log + d).slice(-8000); });

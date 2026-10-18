@@ -14,7 +14,7 @@
       </div>
       <div>
         <h1>Ultimate VMs</h1>
-        <p id="host-line" class="muted"></p>
+        <p class="muted"><span id="host-line"></span> · <button id="version" class="link small-link" title="Check for updates"></button></p>
       </div>
     </div>
     <button id="new-vm" class="btn primary"><span aria-hidden="true">＋</span> New VM</button>
@@ -30,6 +30,18 @@
       <button id="setup-install" class="btn primary">Install VM engine</button>
     </div>
     <pre id="setup-log" class="log" hidden></pre>
+  </section>
+
+  <section id="update" class="banner" hidden>
+    <div class="banner-text">
+      <strong id="update-title"></strong>
+      <span id="update-text"></span>
+      <div id="update-bar" class="bar" hidden><i></i></div>
+    </div>
+    <div class="banner-actions">
+      <button id="update-later" class="btn ghost" hidden>Later</button>
+      <button id="update-go" class="btn primary" hidden></button>
+    </div>
   </section>
 
   <section id="slow" class="banner warn" hidden>
@@ -54,6 +66,7 @@
       <h2>Create your first VM</h2>
       <p class="muted">Pick an operating system. Ultimate VMs downloads and sets up everything for you.</p>
       <div id="quick-picks" class="os-grid"></div>
+      <button id="open-picker" class="btn ghost">Want several? Pick them all at once</button>
     </div>
   </main>
 
@@ -132,6 +145,24 @@
         <button type="button" id="wizard-back" class="btn ghost" hidden>Back</button>
         <span class="spacer"></span>
         <button type="submit" id="wizard-create" class="btn primary" value="create" hidden>Create VM</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Pick several OSes: each one gets Quick Setup (also opens on the first launch) -->
+  <dialog id="picker" class="modal">
+    <form method="dialog" class="modal-body" id="picker-form">
+      <header class="modal-head">
+        <h2>Welcome to Ultimate VMs</h2>
+        <button type="button" class="icon-btn" data-close aria-label="Close">✕</button>
+      </header>
+      <p class="muted">Pick the operating systems you want. Each one is downloaded and installed by itself. Just leave the app open. You can add more any time.</p>
+      <div id="picker-grid" class="os-grid"></div>
+      <p id="picker-note" class="muted small"></p>
+      <footer class="modal-foot">
+        <span class="spacer"></span>
+        <button type="button" class="btn ghost" data-close>Not now</button>
+        <button type="submit" id="picker-go" class="btn primary" disabled>Install selected</button>
       </footer>
     </form>
   </dialog>

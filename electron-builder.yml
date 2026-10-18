@@ -20,6 +20,8 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: Ultimate-VMs-Windows-Setup.${ext}
   shortcutName: Ultimate VMs
+  # Adds the "Which operating systems do you want?" page.
+  include: build/installer.nsh
   uninstallDisplayName: Ultimate VMs
 portable:
   artifactName: Ultimate-VMs-Windows-Portable.${ext}

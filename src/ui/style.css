@@ -262,3 +262,17 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .segmented button.on { background: var(--panel); color: var(--text); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3); }
 .logo-chrome { background: linear-gradient(135deg, #4285f4, #1a56c4); }
 @media (max-width: 760px) { .modes { grid-template-columns: 1fr; } }
+
+/* ---------- Updates, multi-pick ---------- */
+.small-link { font-size: 13px; color: var(--muted); }
+.small-link:hover { color: var(--accent); }
+.small { font-size: 12.5px; }
+#update .bar { margin-top: 6px; max-width: 360px; }
+#open-picker { margin-top: 18px; }
+.os-tile.picked { border-color: var(--accent); background: rgba(108, 140, 255, 0.12); box-shadow: 0 0 0 1px var(--accent) inset; }
+.os-tile .check {
+  position: absolute; top: 10px; right: 10px; width: 20px; height: 20px; border-radius: 6px;
+  border: 1.5px solid var(--line); display: grid; place-items: center; font-size: 13px; color: #fff;
+}
+.os-tile.picked .check { background: var(--accent); border-color: var(--accent); }
+.os-tile { position: relative; }

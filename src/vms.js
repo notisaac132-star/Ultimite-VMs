@@ -9,6 +9,7 @@ const host = require("./host");
 const { download, fetchText, unzipLargest } = require("./download");
 const qemu = require("./engines/qemu");
 const apple = require("./engines/apple");
+const autoinstall = require("./autoinstall");
 
 const root = path.join(app.getPath("home"), "Ultimate VMs");
 const discs = path.join(root, "Install Discs");
@@ -72,10 +73,10 @@ const slug = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^
 // Creates the VM and starts preparing it (downloading its disc, creating its disk) in the background.
 // Quick Setup (quick: true) uses the recommended settings, installs Windows by itself and starts the VM
 // as soon as it's ready. Advanced Setup takes the user's settings and, optionally, their own ISO.
-function create({ osId, quick, name, cpus, memoryMB, diskGB, iso }) {
+function create({ osId, quick, name, cpus, memoryMB, diskGB, iso, deferPrepare }) {
   const entry = catalog.byId(osId);
   if (!entry) throw new Error("Unknown operating system.");
-  const plan = host.plan(entry);
+  const plan = host.plan(entry, { quick });
   if (!plan.engine) throw new Error(plan.reason);
   if (quick && !entry.quick) throw new Error(`${entry.name} needs Advanced Setup.`);
   if (entry.source.type === "manual" && !iso) throw new Error("Choose the install disc (.iso file) first.");
@@ -90,8 +91,11 @@ function create({ osId, quick, name, cpus, memoryMB, diskGB, iso }) {
     guestArch: plan.guestArch,
     firmware: entry.firmware || "bios",
     bypassChecks: !!entry.bypassChecks,
-    // Hands-free Windows install; only with the ISO the app downloads (its language is known).
+    // Hands-free installs: Windows through its answer file (only with the ISO the app downloads, whose
+    // language is known); Linux through its installer's automatic mode (see autoinstall.js).
     unattended: !!(quick && entry.unattended),
+    autoInstall: (quick && plan.engine === "qemu" && entry.autoInstall) || null,
+    culture: app.getLocale(),
     autoStart: !!quick,
     cpus: clamp(settings.cpus, 1, host.info.cpus),
     memoryMB: clamp(settings.memoryMB, 512, Math.max(1024, host.info.memoryMB - 1024)),
@@ -102,7 +106,7 @@ function create({ osId, quick, name, cpus, memoryMB, diskGB, iso }) {
     createdAt: Date.now(),
   };
   save(vm);
-  prepare(vm.id);
+  if (!deferPrepare) prepare(vm.id);
   return view(vm);
 }
 
@@ -133,7 +137,9 @@ async function prepare(id) {
     fs.mkdirSync(discs, { recursive: true });
     if (entry.source.type === "auto" && !vm.iso) {
       step(`Finding the newest ${entry.name}…`);
-      const found = await entry.source.resolve(vm.guestArch, fetchText, app.getLocale());
+      // Hands-free installs may need a different disc (e.g. Fedora's network installer).
+      const resolve = (vm.autoInstall && entry.source.resolveInstaller) || entry.source.resolve;
+      const found = await resolve(vm.guestArch, fetchText, app.getLocale());
       vm.iso = await fetchDisc(found, entry.name, step, abort.signal);
       if (found.culture) vm.culture = found.culture;
       save(vm);
@@ -163,6 +169,7 @@ async function prepare(id) {
     const autoStart = vm.autoStart;
     vm.autoStart = false;
     save(vm);
+    if (autoStart) await waitForMemory(vm, step, abort.signal);
     liveOf(id).job = null;
     changed(id);
     if (autoStart) await start(id);
@@ -176,6 +183,43 @@ async function prepare(id) {
         : err.message;
     changed(id);
   }
+}
+
+// Several Quick Setup VMs at once: don't start one until the computer has memory free for it.
+async function waitForMemory(vm, step, signal) {
+  const spare = () => host.info.memoryMB - 2048 - list().filter((v) => v.status === "running").reduce((sum, v) => sum + v.memoryMB, 0);
+  while (spare() < vm.memoryMB && list().some((v) => v.status === "running")) {
+    if (signal.aborted) throw new Error("Cancelled");
+    step("Waiting for your other VMs to finish, so this computer doesn't run out of memory…");
+    await new Promise((r) => setTimeout(r, 15000));
+  }
+}
+
+// Quick Setup for several OSes (the first-run picker, or the Windows installer's OS page).
+// Downloads happen one after another; each VM starts as soon as it's ready.
+async function createMany(osIds) {
+  const created = [];
+  for (const osId of osIds) {
+    try {
+      created.push(create({ osId, quick: true, deferPrepare: true }));
+    } catch (err) {
+      created.push({ osId, error: err.message });
+    }
+  }
+  const queued = created.filter((vm) => vm.id);
+  for (const vm of queued) setJob(vm.id, { label: "Waiting its turn to download…", progress: null, abort: new AbortController() });
+  (async () => {
+    for (const vm of queued) {
+      if (liveOf(vm.id).job?.abort.signal.aborted) {
+        liveOf(vm.id).job = null;
+        liveOf(vm.id).error = "Setup was cancelled. Click “Resume setup” to continue.";
+        changed(vm.id);
+        continue;
+      }
+      await prepare(vm.id);
+    }
+  })();
+  return created;
 }
 
 // Downloads into Install Discs (skipped when already there). Returns the file path.
@@ -223,6 +267,16 @@ async function start(id) {
       l.running = false;
       l.controller = null;
       l.slow = !!slow;
+      // A hands-free Linux install powers the VM off when it's done: eject the disc and boot the new system.
+      if (vm.autoInstall && !vm.installed && code === 0 && autoinstall.looksInstalled(folderOf(id))) {
+        const fresh = read(id);
+        Object.assign(fresh, { installed: true, iso: null });
+        save(fresh);
+        autoinstall.cleanup(fresh, folderOf(id));
+        changed(id);
+        start(id).catch((err) => { l.error = err.message; changed(id); });
+        return;
+      }
       // A VM that dies within a few seconds failed to start; show QEMU's/the helper's explanation.
       if (code && Date.now() - started < 15000) l.error = lastLines(log) || `The VM stopped unexpectedly (code ${code}).`;
       changed(id);
@@ -278,6 +332,7 @@ module.exports = {
   folderOf,
   list,
   create,
+  createMany,
   prepare,
   cancel,
   start,

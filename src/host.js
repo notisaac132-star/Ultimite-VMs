@@ -17,7 +17,9 @@ const info = {
 };
 
 // Returns { engine, guestArch, warning } or { engine: null, reason }.
-function plan(entry) {
+// options.quick: Quick Setup installs Linux hands-free, which needs QEMU (Apple's framework can't pass
+// the installer its automatic-install settings), so on Macs Quick Setup runs Linux on QEMU.
+function plan(entry, options = {}) {
   if (entry.family === "macos") {
     if (isAppleSilicon) return { engine: "apple", guestArch: "aarch64" };
     if (platform === "darwin") return { engine: null, reason: "macOS VMs need a Mac with Apple Silicon (M1 or newer). Apple's VM support doesn't run macOS on Intel Macs." };
@@ -38,7 +40,8 @@ function plan(entry) {
   }
   // Linux and custom ISOs: Macs use Apple's built-in virtualization (fast, nothing to install).
   // ChromeOS Flex needs a PC-style machine, so it always runs on QEMU.
-  return { engine: platform === "darwin" && entry.family !== "chromeos" ? "apple" : "qemu", guestArch: arch };
+  const qemuOnMac = entry.family === "chromeos" || (options.quick && entry.autoInstall);
+  return { engine: platform === "darwin" && !qemuOnMac ? "apple" : "qemu", guestArch: arch };
 }
 
 module.exports = { info, plan };

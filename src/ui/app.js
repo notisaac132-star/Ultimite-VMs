@@ -46,6 +46,7 @@ function card(vm) {
   let hint = "";
   if (vm.status === "running" && vm.iso && !vm.installed) {
     if (vm.unattended) hint = "Windows is installing itself. Just wait: it restarts a few times and ends on the desktop (about 20–40 minutes).";
+    else if (vm.autoInstall) hint = "Installing by itself, no need to click anything. The window closes when it's done and the VM restarts into the new system (log in: <b>user</b> / <b>user</b>).";
     else if (vm.family === "linux") hint = "You're in the live desktop. To keep it for good, use the <b>Install</b> icon on its desktop, then shut down and click <b>⋯ → Eject disc</b>.";
     else if (vm.family === "chromeos") hint = "Pick <b>Try it first</b> to use ChromeOS now, or <b>Install ChromeOS Flex</b> to keep it, then shut down and click <b>⋯ → Eject disc</b>.";
     else hint = `Follow the steps in the VM's window${vm.family === "windows" ? " (no product key? click <b>“I don't have a product key”</b>)" : ""}. When it's installed, shut down and click <b>⋯ → Eject disc</b>.`;
@@ -264,7 +265,7 @@ function openAdvanced() {
 }
 
 async function quickSetup() {
-  if (picked.engine === "qemu" && !state.engines.qemu) {
+  if (picked.quickEngine === "qemu" && !state.engines.qemu) {
     wizard.close();
     if (!(await installEngine())) return;
   }
@@ -428,6 +429,95 @@ $("#settings-form").addEventListener("submit", async (e) => {
 
 document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
 
+// ---------- Pick several OSes ----------
+
+const picker = $("#picker");
+const picks = new Set();
+
+function openPicker() {
+  picks.clear();
+  const usable = state.catalog.filter((o) => o.quick && o.quickEngine);
+  $("#picker-grid").innerHTML = usable.map((os) => osTile(os).replace("</button>", `<span class="check"></span></button>`)).join("");
+  renderPicks();
+  picker.showModal();
+}
+
+function renderPicks() {
+  $("#picker-grid").querySelectorAll("[data-os]").forEach((t) => {
+    t.classList.toggle("picked", picks.has(t.dataset.os));
+    t.querySelector(".check").textContent = picks.has(t.dataset.os) ? "✓" : "";
+  });
+  const n = picks.size;
+  $("#picker-go").disabled = !n;
+  $("#picker-go").textContent = n ? `Install ${n} automatically` : "Install selected";
+  const mem = [...picks].reduce((sum, id) => sum + osById(id).defaults.memoryMB, 0);
+  $("#picker-note").textContent = n > 1 && mem > state.host.memoryMB - 2048
+    ? "They'll download one after another, and install one or two at a time so this computer doesn't run out of memory."
+    : n ? "They'll download one after another and start as soon as each is ready." : "";
+}
+
+$("#picker-grid").addEventListener("click", (e) => {
+  const tile = e.target.closest("[data-os]");
+  if (!tile) return;
+  const id = tile.dataset.os;
+  if (picks.has(id)) picks.delete(id);
+  else picks.add(id);
+  renderPicks();
+});
+
+async function installMany(osIds) {
+  const needQemu = osIds.some((id) => osById(id)?.quickEngine === "qemu");
+  if (needQemu && !state.engines.qemu && !(await installEngine())) return;
+  const created = await vmApi.createMany(osIds);
+  for (const vm of created) if (vm.id) vms.set(vm.id, vm);
+  const failed = created.filter((vm) => vm.error);
+  if (failed.length) alert(failed.map((f) => `${osById(f.osId)?.name}: ${f.error}`).join("\n"));
+  render();
+}
+
+$("#picker-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  picker.close();
+  installMany([...picks]);
+});
+$("#open-picker").addEventListener("click", openPicker);
+
+// ---------- Updates ----------
+
+let updateDismissed = false;
+function renderUpdate(u) {
+  if (!u) return;
+  $("#version").textContent = u.state === "checking" ? `v${state.version} · checking…` : u.state === "latest" ? `v${state.version} · up to date` : `v${state.version}`;
+  const show = { downloading: true, ready: true, manual: true }[u.state] && !(updateDismissed && u.state !== "ready");
+  $("#update").hidden = !show;
+  if (!show) return;
+  $("#update-bar").hidden = u.state !== "downloading";
+  $("#update-bar i").style.width = `${u.percent || 0}%`;
+  $("#update-later").hidden = u.state === "downloading";
+  $("#update-go").hidden = u.state === "downloading";
+  if (u.state === "downloading") {
+    $("#update-title").textContent = `Downloading Ultimate VMs ${u.version}…`;
+    $("#update-text").textContent = `${u.percent || 0}%. Keep using the app; it'll be ready in a moment.`;
+  } else if (u.state === "ready") {
+    $("#update-title").textContent = `Ultimate VMs ${u.version} is ready`;
+    $("#update-text").textContent = "Restart to finish updating (takes a few seconds). It also installs by itself next time you close the app.";
+    $("#update-go").textContent = "Restart and update";
+  } else {
+    $("#update-title").textContent = `Ultimate VMs ${u.version} is out`;
+    $("#update-text").textContent = u.message || "";
+    $("#update-go").textContent = "Download it";
+  }
+}
+vmApi.onUpdateStatus(renderUpdate);
+$("#update-later").addEventListener("click", () => { updateDismissed = true; $("#update").hidden = true; });
+$("#update-go").addEventListener("click", async () => {
+  const u = await vmApi.updateStatus();
+  if (u.state === "manual") return vmApi.openReleases();
+  const r = await vmApi.installUpdate();
+  if (r.blocked) alert("Shut down your running VMs first, then click “Restart and update” again.");
+});
+$("#version").addEventListener("click", async () => renderUpdate(await vmApi.checkUpdates()));
+
 // ---------- Start ----------
 
 (async () => {
@@ -438,4 +528,13 @@ document.querySelectorAll("[data-close]").forEach((b) => b.addEventListener("cli
   $("#quick-picks").innerHTML = state.catalog.filter((o) => o.engine).map(osTile).join("");
   renderSetup();
   render();
+  renderUpdate(await vmApi.updateStatus());
+
+  // OSes picked in the Windows installer get set up right away; otherwise the very first launch
+  // shows the "pick your OSes" screen.
+  const fromInstaller = await vmApi.firstRunPicks();
+  let welcomed = false;
+  try { welcomed = localStorage.getItem("welcomed") === "1"; localStorage.setItem("welcomed", "1"); } catch {}
+  if (fromInstaller.length) installMany(fromInstaller);
+  else if (!welcomed && vms.size === 0) openPicker();
 })();

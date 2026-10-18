@@ -31,16 +31,18 @@
 
 Click **New VM** (or one of the big OS tiles), pick an OS, then choose:
 
-### ⚡ Quick Setup (one click)
+### ⚡ Quick Setup (one click, installs by itself)
 
-Uses recommended settings and downloads everything for you, then starts the VM by itself.
+Uses recommended settings, downloads everything, installs the OS with no questions and starts the VM.
 
-| OS | What Quick Setup does |
+| OS | What happens |
 |---|---|
-| **Windows 11 / 10** | Downloads Windows straight from Microsoft and **installs it with no questions**: no product key, no Microsoft account, TPM/Secure Boot checks skipped. You end up on the desktop as user **User** (no password) in about 20–40 minutes. |
-| **macOS** | Downloads the newest macOS from Apple and installs it. Then you finish Apple's short welcome setup. |
-| **ChromeOS Flex** | Downloads it from Google and starts it. Pick **Try it first** or **Install ChromeOS Flex**. |
-| **Linux** | Downloads the newest version (checked with SHA-256) and opens its **live desktop** right away. Use its **Install** icon to keep it. |
+| **Windows 11 / 10** | Downloaded from Microsoft, installed hands-free: no product key, no Microsoft account, TPM/Secure Boot checks skipped. Ends on the desktop as user **User** (no password). |
+| **Ubuntu, Fedora, Debian, Linux Mint** | Downloaded from the official site and installed hands-free with each distro's own automatic installer. Ends on the desktop, logged in as **user** (password **user**). |
+| **macOS** | Downloaded from Apple and installed. Then finish Apple's short welcome setup (Apple doesn't allow skipping it). |
+| **ChromeOS Flex** | Downloaded from Google and started. Click **Install ChromeOS Flex**, then sign in with Google (Google requires that step). |
+
+**Pick several at once:** the first time the app opens (and from **"Want several? Pick them all at once"**), tick every OS you want and they're all set up automatically, one after another. The **Windows installer** also has a *"Which operating systems do you want?"* page; whatever you tick there is set up the first time the app opens.
 
 ### ⚙ Advanced Setup
 
@@ -66,7 +68,9 @@ macOS and Linux VMs use Apple's built-in Virtualization framework — nothing ex
 - **Mac:** open `Ultimate-VMs-Mac.dmg` and drag the app into Applications. If it says *"Apple could not verify…"*, go to  → System Settings → Privacy & Security and click **Open Anyway**.
 - **Linux:** download `Ultimate-VMs-Linux.AppImage`, make it executable (`chmod +x`) and run it.
 
-Installed copies update themselves.
+### Updates
+
+The app updates itself. It checks GitHub for a new version when it opens and every few hours, downloads it in the background, and shows **Restart and update** (it also installs by itself the next time you close the app). Click the version number at the top to check right away. The portable Windows version can't replace itself, so it shows a download link instead.
 
 ## For developers
 
@@ -83,6 +87,9 @@ npm run build:windows  # or build:mac / build:linux
 | `src/vms.js` | The VM library: create, prepare (download disc, make disk), start, stop |
 | `src/catalog.js` | The OS list and where each install disc comes from |
 | `src/host.js` | Decides which engine runs each OS on this computer |
-| `src/engines/qemu.js` | QEMU engine (Windows/Linux hosts, Windows-on-Mac) |
+| `src/engines/qemu.js` | QEMU engine (Windows, Linux, ChromeOS; Windows answer file) |
+| `src/autoinstall.js` + `src/iso9660.js` | Hands-free Linux installs (answer files, booting the installer from the ISO) |
+| `src/updater.js` | Auto-updater |
+| `build/installer.nsh` | The Windows installer's "Which operating systems?" page |
 | `src/engines/apple.js` + `mac/macvm/main.swift` | Apple Virtualization engine (macOS and Linux on Macs) |
 | `.github/workflows/build.yml` | Builds all three apps on every push and publishes a release from the default branch |
